@@ -251,6 +251,13 @@ function opencodeConfig(input: {
         },
       },
     },
+    agents: {
+      "vv-controller": {
+        description: "Core controller agent for explicit-agent creation controls",
+        mode: "primary",
+        model: "loopback/seam-smart#override",
+      },
+    },
     plugins: [{ package: input.pluginDir }],
   };
 }

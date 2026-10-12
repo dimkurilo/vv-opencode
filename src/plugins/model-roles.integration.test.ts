@@ -30,8 +30,8 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [C-OPENCODE-V2-NATIVE T-008 - Ported the custom-agent intent fixture from the V1 `agent` document key to the native `agents` envelope, preserving the role/literal override assertion.]
-//   PREVIOUS: [C-OPENCODE-V2-NATIVE wi-7 attempt 2 - Added event-pump per-event containment coverage (invalid/transient config reads followed by valid lifecycle events) and a bound-family isolation regression: an invalid mutable current config does not fail or re-adopt an already-bound family, a new unbound session fails closed, and both recover after the config is fixed.]
+//   LAST_CHANGE: [Direct fix - Added the location-only first-turn regression: a session with no agent and no model whose first primary dispatch carries the pre-binding bare role base must be admitted once after the family bound, and later bare-base dispatches still refuse.]
+//   PREVIOUS: [C-OPENCODE-V2-NATIVE T-008 - Ported the custom-agent intent fixture from the V1 `agent` document key to the native `agents` envelope, preserving the role/literal override assertion.]
 // END_CHANGE_SUMMARY
 
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
@@ -584,6 +584,58 @@ describe("native snapshot runtime admission", () => {
     );
     expect(accumulated).toEqual([]);
     await runtime.release();
+    await registration.dispose();
+  });
+
+  test("a location-only first turn survives its pre-binding bare-base dispatch", async () => {
+    await isolateDataHome();
+    const project = await createProject({ default: "prov/m1#fast" });
+    const context = new FakeNativeContext(project);
+    const host = new FakeRuntimeHost(context);
+    const model = context.addModel("prov", "m1");
+    model.variants.push({ id: Model.VariantID.make("fast"), settings: { temperature: 0.2 } });
+    context.setDefault("prov", "m1");
+    // The reported shape: no agent and no model on the session, so the host can
+    // resolve the first dispatch against the unqualified role base before the
+    // prompt hook's binding switch lands.
+    makeBoundSession(context, "root");
+
+    const registration = await registerModelRoles(context, {
+      enabled: true,
+      runtimeDeps: host.createDeps(),
+    });
+    await promptWork(context, "root");
+    const bound = context.switchCalls[0]?.model;
+    expect(bound?.providerID).toBe("prov");
+    expect(bound?.modelID).toBe("m1");
+    expect(bound?.variant).toMatch(/\.m1\.fast$/);
+
+    // The pre-binding resolution: the bare role base without the family variant.
+    await context.invoke("model.request", {
+      sessionID: "root",
+      model: { id: "m1", providerID: "prov" },
+      kind: "primary",
+    });
+
+    // After the switch, resolutions carry the family-qualified variant.
+    await context.invoke("model.request", {
+      sessionID: "root",
+      model: {
+        id: "m1",
+        providerID: "prov",
+        ...(bound?.variant === undefined ? {} : { variant: bound.variant }),
+      },
+      kind: "primary",
+    });
+
+    // The tolerance is one-shot: a later bare-base dispatch is genuine drift.
+    await expect(
+      context.invoke("model.request", {
+        sessionID: "root",
+        model: { id: "m1", providerID: "prov" },
+        kind: "primary",
+      }),
+    ).rejects.toThrow(/does not match/);
     await registration.dispose();
   });
 

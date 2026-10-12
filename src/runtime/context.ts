@@ -2,7 +2,7 @@
 // VERSION: 1.1.0
 // START_MODULE_CONTRACT
 //   PURPOSE: Acquire, share by exact plugin-context identity, and release the lifecycle-managed native runtime, family-binding service, and centralized native runtime (client/permissions/bindings/config/model/auxiliary) consumed by every later native plugin.
-//   SCOPE: Context-identity reference-counted registries, per-acquisition idempotent leases, lazy authenticated-client caching, permission-service exposure, native model/agent overlay capture, default-model transform, config.updated reconfiguration, coherent first-work binding, rehydrated guard/variants, session-deletion cleanup, cross-context coordination, the read-only context-inspection RPC, and idempotent teardown without stopping the host. No candidate staging, accepted-input publication, service discovery until a client is requested, location-only sharing, global configuration singleton, parallel fake runtime, or V1 compatibility facade.
+//   SCOPE: Context-identity reference-counted registries, per-acquisition idempotent leases, lazy authenticated-client caching, permission-service exposure, native model/agent overlay capture, default-model transform, config.updated reconfiguration, coherent first-work binding, rehydrated guard/variants, one-shot first-work admission tolerance for a dispatch resolved before the binding switch lands, session-deletion cleanup, cross-context coordination, the read-only context-inspection RPC, and idempotent teardown without stopping the host. No candidate staging, accepted-input publication, service discovery until a client is requested, location-only sharing, global configuration singleton, parallel fake runtime, or V1 compatibility facade.
 //   DEPENDS: [node:crypto, @opencode/plugin, src/lib/config-layers.ts, src/runtime/client.ts, src/runtime/coordination.ts, src/runtime/context-inspection.ts, src/runtime/model-registry.ts, src/runtime/permissions.ts, src/runtime/snapshot-config.ts, src/runtime/snapshot-store.ts, src/runtime/snapshots.ts, src/runtime/types.ts]
 //   LINKS: [M-NATIVE-RUNTIME, V-M-NATIVE-RUNTIME]
 //   ROLE: RUNTIME
@@ -24,8 +24,8 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [C-SNAPSHOT-ANCHORING-REDESIGN T-004/T-005/T-008 - Replaced candidate acceptance with durable bind-on-first-work, runtime rehydration of credential-free bindings, live overlay materialization, explicit-selection qualification that matches the host-resolved family variant, native session-deletion cleanup.]
-//   PREVIOUS: [C-OPENCODE-V2-NATIVE T-009 - One coherent admission config: bindings are rebuilt from the fresh role map plus raw intent so a vvoc role change with no config.updated selects and captures the new model; the same value drives the candidate target and the family capture for prompt and owned work, and services share an app/location-identity coordinator.]
+//   LAST_CHANGE: [Direct fix - First-work admission tolerance: the host may resolve a dispatch against the unqualified role base before the prompt hook's binding switch lands, so the guard now accepts that one bare-base resolution for a session this runtime just bound and switched, instead of killing the session's first turn with SnapshotAdmissionError.]
+//   PREVIOUS: [C-SNAPSHOT-ANCHORING-REDESIGN T-004/T-005/T-008 - Replaced candidate acceptance with durable bind-on-first-work, runtime rehydration of credential-free bindings, live overlay materialization, explicit-selection qualification that matches the host-resolved family variant, native session-deletion cleanup.]
 // END_CHANGE_SUMMARY
 
 import { randomBytes } from "node:crypto";
@@ -853,6 +853,7 @@ function initializeNativeSnapshotRuntime<Client extends NativeForkClient>(
         explicitSelections: Map<string, ModelSelection>;
         pluginSwitches: Map<string, ModelSelection>;
         suppressedTitles: Set<string>;
+        firstWorkPending: Set<string>;
       } = {
         config: base,
         agentBindings: [],
@@ -871,6 +872,11 @@ function initializeNativeSnapshotRuntime<Client extends NativeForkClient>(
         explicitSelections: new Map(),
         pluginSwitches: new Map(),
         suppressedTitles: new Set(),
+        // Sessions this runtime just bound and switched at first work. The host may
+        // resolve the dispatch against the pre-binding role base while the hook's
+        // own switch is still landing, so the guard tolerates exactly that one
+        // bare-base resolution instead of failing the session's first turn.
+        firstWorkPending: new Set(),
       };
 
       const store = options?.store ?? new FileBindingStore({ scopeKey: ctx.location.project.id });
@@ -1228,6 +1234,7 @@ function initializeNativeSnapshotRuntime<Client extends NativeForkClient>(
           if (!state.roleOverride || state.explicitSelections.has(sessionID)) return;
           const target = expectedForSession(existing, view.agent, sessionID);
           if (target !== undefined && !sameModelSelection(sessionModel, target)) {
+            state.firstWorkPending.add(sessionID);
             await switchSession(sessionID, target);
           }
           return;
@@ -1246,6 +1253,10 @@ function initializeNativeSnapshotRuntime<Client extends NativeForkClient>(
         // role; when role overriding is off the session's current model is bound.
         const selectionOverride =
           explicitSelection === undefined && base !== undefined ? base : undefined;
+        // The admission below switches this session onto the family selection; a
+        // dispatch the host resolved before that switch lands carries the bare
+        // role base, so the guard gets a one-shot tolerance for this session.
+        state.firstWorkPending.add(sessionID);
         const outcome = await snapshots.admitOwned(
           {
             sessionID,
@@ -1295,10 +1306,28 @@ function initializeNativeSnapshotRuntime<Client extends NativeForkClient>(
             kind === "title"
               ? titleExpectedSelection(capture)
               : expectedForSession(capture, effectiveAgent, sessionID, view.metadata);
+          // The first post-binding dispatch ends the first-work window whether
+          // it resolves clean or not: after it, sessions resolve their switched
+          // family model, so any bare-base dispatch is genuine drift again.
+          const firstWork = state.firstWorkPending.delete(sessionID);
           if (
             !selectionMatches(actual, expected) &&
             !sameSourceSelection(capture, actual, expected)
           ) {
+            // A dispatch resolved before this runtime's own first-work switch
+            // carries the bare role base of the very selection the switch just
+            // materialized. Accept that one pre-binding resolution; every later
+            // bare-base dispatch still rejects as drift.
+            if (
+              firstWork &&
+              actual !== undefined &&
+              expected !== undefined &&
+              actual.providerID === expected.providerID &&
+              actual.modelID === expected.modelID &&
+              actual.variant === undefined
+            ) {
+              return;
+            }
             throw new SnapshotAdmissionError(
               `Resolved ${kind} model ${actual?.providerID ?? "?"}/${actual?.modelID ?? "?"} does not match the captured family selection for ${familyId}.`,
             );
@@ -1432,6 +1461,9 @@ function initializeNativeSnapshotRuntime<Client extends NativeForkClient>(
                 ) {
                   // The host emits this only for a real change, so it is a user choice.
                   state.explicitSelections.set(selected.sessionID, selected.model);
+                  // A user choice ends the first-work tolerance: later bare-base
+                  // dispatches are genuine drift again.
+                  state.firstWorkPending.delete(selected.sessionID);
                 }
               }
               if (isConfigUpdateEvent(event)) {
@@ -1452,6 +1484,7 @@ function initializeNativeSnapshotRuntime<Client extends NativeForkClient>(
                   state.explicitSelections.delete(sessionID);
                   state.pluginSwitches.delete(sessionID);
                   state.suppressedTitles.delete(sessionID);
+                  state.firstWorkPending.delete(sessionID);
                 }
               }
             } catch (error) {
