@@ -3,7 +3,7 @@
 // VERSION: 2.0.0
 // START_MODULE_CONTRACT
 //   PURPOSE: Orchestrate the isolated packed-package core real-host run: build, pack, install, prepare the fixture project, own the host lifecycle on an ownership-marked scratch, drive the core cases, and persist bounded machine-readable evidence.
-//   SCOPE: Ownership-marked scratch creation/removal, in-process loopback provider, packed fixture plugin materialization, exact-PID host startup/restart/teardown, bounded control-plane and native API driver, per-request provider attribution, case execution, and evidence writing. It never signs services, never kills by name, and never dispatches to a non-loopback origin.
+//   SCOPE: Ownership-marked scratch creation/removal, in-process loopback provider, packed fixture plugin materialization, exact-PID host startup/restart/teardown, bounded control-plane and native API driver, per-request provider attribution, case execution, and evidence writing. Default evidence paths resolve under the harness scratch base and never inside the workspace. It never signs services, never kills by name, and never dispatches to a non-loopback origin.
 //   DEPENDS: [node:fs/promises, node:net, node:path, node:url, scripts/e2e-v2/cases.ts, scripts/e2e-v2/host.ts, scripts/e2e-v2/provider.ts]
 //   LINKS: [M-E2E-V2-HARNESS, V-M-E2E-V2-HARNESS]
 //   ROLE: SCRIPT
@@ -13,6 +13,7 @@
 // START_MODULE_MAP
 //   CoreRunOptions - Inputs controlling one core real-host run.
 //   CoreRunSummary - Machine-readable summary of one core real-host run.
+//   defaultEvidencePath - Default evidence location under the harness scratch base, kept outside the workspace.
 //   getFreePort - Reserve and release a loopback TCP port.
 //   delay - Promise-based millisecond delay used by host lifecycle polling.
 //   waitForPidExit - True once an owned PID no longer exists; polls without signalling anything else.
@@ -57,9 +58,9 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [C-OPENCODE-V2-NATIVE T-009-FULL - Installs the packed tarball with its declared dependency graph, verifies per-row outcomes, and drives the INSTALLED root aggregate on the real host control plane: system-context injection, analytics usage, peak-hours PRIMARY gating, web-tools permission-before-network, guardian deny/allow file-write gating, hashline-edit routed-tool + stale-anchor rejection, spec-guard scoped enforcement, and tool-history-compaction of the real dispatched request; retries readiness and deterministically replays the auxiliary family after restart.]
+//   LAST_CHANGE: [Direct fix - Default evidence paths now resolve under the harness scratch base (vvoc-e2e-evidence) instead of the workspace GRACE change tree, so a run never leaves evidence files that turn `grace lint` red.]
+//   PREVIOUS: [C-OPENCODE-V2-NATIVE T-009-FULL - Installs the packed tarball with its declared dependency graph, verifies per-row outcomes, and drives the INSTALLED root aggregate on the real host control plane: system-context injection, analytics usage, peak-hours PRIMARY gating, web-tools permission-before-network, guardian deny/allow file-write gating, hashline-edit routed-tool + stale-anchor rejection, spec-guard scoped enforcement, and tool-history-compaction of the real dispatched request; retries readiness and deterministically replays the auxiliary family after restart.]
 //   PREVIOUS: [C-OPENCODE-V2-NATIVE T-009-FULL - Installed-surface checks (root aggregate, standalone subpaths, nine-tool census, presets/variants, managed agents/skills, installed CLI lifecycle).]
-//   PREVIOUS: [C-OPENCODE-V2-NATIVE T-003 correction - Owned scratch lifecycle, bounded host output/control, guard-aware evidence, and restart coverage of auxiliary families.]
 // END_CHANGE_SUMMARY
 
 import { createServer } from "node:net";
@@ -126,6 +127,15 @@ export interface CoreRunSummary {
   readonly installedSurface?: InstalledSurfaceResult;
   readonly aggregateChecks?: readonly AggregateCheck[];
   readonly error?: string;
+}
+
+/**
+ * Default evidence location under the harness scratch base. Evidence never
+ * lands inside the workspace, so a run leaves no files in the GRACE change
+ * tree and `grace lint` stays green right after a run.
+ */
+export function defaultEvidencePath(scratchBase: string, fileName: string): string {
+  return join(scratchBase, "vvoc-e2e-evidence", fileName);
 }
 
 // START_BLOCK_PORT

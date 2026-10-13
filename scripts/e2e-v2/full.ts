@@ -21,13 +21,13 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [C-OPENCODE-V2-NATIVE T-009-FULL - Resolves rows per case/check across the core, real-PTY TUI, installed-surface, and installed-aggregate tiers so one flaky scenario no longer cascades; records installed paths, per-check observations, and native limits, and never promotes an unobserved row.]
-//   PREVIOUS: [C-OPENCODE-V2-NATIVE T-009 - Added the installed-artifact full runner that reuses the packed core and real-PTY TUI tiers, records exact host/package/dependency hashes, and refuses to pass while any mandatory parity row is unverified.]
+//   LAST_CHANGE: [Direct fix - The core tier inside a full run now records its evidence under the harness scratch base (vvoc-e2e-evidence) instead of the workspace GRACE change tree, so a full run never leaves files that turn `grace lint` red.]
+//   PREVIOUS: [C-OPENCODE-V2-NATIVE T-009-FULL - Resolves rows per case/check across the core, real-PTY TUI, installed-surface, and installed-aggregate tiers so one flaky scenario no longer cascades; records installed paths, per-check observations, and native limits, and never promotes an unobserved row.]
 // END_CHANGE_SUMMARY
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { runCore, requireHostBinary, type CoreRunSummary } from "./core.js";
+import { defaultEvidencePath, runCore, requireHostBinary, type CoreRunSummary } from "./core.js";
 import {
   buildParityEvidence,
   evaluateParityRows,
@@ -138,7 +138,7 @@ export async function runFull(
     workspaceRoot: options.workspaceRoot,
     hostBinary: options.hostBinary,
     scratchBase: options.scratchBase,
-    evidencePath: join(options.workspaceRoot, ".grace", "changes", "active", "C-OPENCODE-V2-NATIVE", "core-evidence.json"),
+    evidencePath: defaultEvidencePath(options.scratchBase, "core-evidence.json"),
     keepScratch: options.keepScratch,
     caseTimeoutMs: options.caseTimeoutMs,
   });

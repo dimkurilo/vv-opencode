@@ -3,7 +3,7 @@
 // VERSION: 1.0.0
 // START_MODULE_CONTRACT
 //   PURPOSE: Command-line entry for the v2 real-host acceptance harness with explicit core, full, TUI, and inventory modes.
-//   SCOPE: Argument parsing, parity inventory listing, delegation to the full installed-artifact runner, delegation to the real-PTY TUI tier, and delegation to the packed core run with bounded stdout and nonzero exit codes. It has no import-time side effects.
+//   SCOPE: Argument parsing, parity inventory listing, default evidence paths that resolve under the harness scratch base and never inside the workspace, delegation to the full installed-artifact runner, delegation to the real-PTY TUI tier, and delegation to the packed core run with bounded stdout and nonzero exit codes. It has no import-time side effects.
 //   DEPENDS: [node:fs, node:path, scripts/e2e-v2/core.ts, scripts/e2e-v2/full.ts, scripts/e2e-v2/tui.ts]
 //   LINKS: [M-E2E-V2-HARNESS, V-M-E2E-V2-HARNESS]
 //   ROLE: SCRIPT
@@ -21,14 +21,15 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [C-OPENCODE-V2-NATIVE T-009 - Wired the default `--full` mode to the installed-artifact full runner that writes parity evidence and fails while any mandatory parity row is unverified.]
+//   LAST_CHANGE: [Direct fix - Default core/full evidence paths now resolve under the harness scratch base (vvoc-e2e-evidence) instead of `.grace/changes/active/`, so a run stops leaving evidence files that turn `grace lint` red inside the workspace.]
+//   PREVIOUS: [C-OPENCODE-V2-NATIVE T-009 - Wired the default `--full` mode to the installed-artifact full runner that writes parity evidence and fails while any mandatory parity row is unverified.]
 //   PREVIOUS: [C-OPENCODE-V2-NATIVE T-008 - Replaced the non-passing TUI scaffold with the real-PTY `--tui` tier and added an injectable runTui dependency. T-003 - Added the mode-aware harness entry that refuses full parity until T-004..T-010 land.]
 // END_CHANGE_SUMMARY
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runCore, requireHostBinary, type CoreRunSummary } from "./e2e-v2/core.js";
+import { defaultEvidencePath, runCore, requireHostBinary, type CoreRunSummary } from "./e2e-v2/core.js";
 import { runFull, type FullRunSummary } from "./e2e-v2/full.js";
 import { runTuiAcceptance, type TuiAcceptanceResult } from "./e2e-v2/tui.js";
 
@@ -147,14 +148,7 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
     const scratchBase = deps.scratchBase ?? process.env.VVOC_E2E_SCRATCH ?? "/tmp/opencode";
     const evidencePath =
       deps.evidencePath ??
-      join(
-        deps.workspaceRoot,
-        ".grace",
-        "changes",
-        "active",
-        "C-OPENCODE-V2-NATIVE",
-        "parity-evidence.json",
-      );
+      defaultEvidencePath(scratchBase, "parity-evidence.json");
     const runner =
       deps.runFull ??
       ((options: Parameters<NonNullable<CliDeps["runFull"]>>[0]) => runFull(options));
@@ -193,7 +187,7 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
   const scratchBase = deps.scratchBase ?? process.env.VVOC_E2E_SCRATCH ?? "/tmp/opencode";
   const evidencePath =
     deps.evidencePath ??
-    join(deps.workspaceRoot, ".grace", "changes", "active", "C-OPENCODE-V2-NATIVE", "core-evidence.json");
+    defaultEvidencePath(scratchBase, "core-evidence.json");
   const summary = await deps.runCore({
     workspaceRoot: deps.workspaceRoot,
     hostBinary,
