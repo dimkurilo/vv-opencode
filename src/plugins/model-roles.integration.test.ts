@@ -30,8 +30,8 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [Direct fix - Added the location-only first-turn regression: a session with no agent and no model whose first primary dispatch carries the pre-binding bare role base must be admitted once after the family bound, and later bare-base dispatches still refuse.]
-//   PREVIOUS: [C-OPENCODE-V2-NATIVE T-008 - Ported the custom-agent intent fixture from the V1 `agent` document key to the native `agents` envelope, preserving the role/literal override assertion.]
+//   LAST_CHANGE: [Direct fix follow-up - Added the pump-missed user-choice regression: an external session-model change the event pump never saw must close the first-work window, so its bare-base dispatch refuses as drift.]
+//   PREVIOUS: [Direct fix - Added the location-only first-turn regression: a session with no agent and no model whose first primary dispatch carries the pre-binding bare role base must be admitted once after the family bound, and later bare-base dispatches still refuse.]
 // END_CHANGE_SUMMARY
 
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
@@ -629,6 +629,45 @@ describe("native snapshot runtime admission", () => {
     });
 
     // The tolerance is one-shot: a later bare-base dispatch is genuine drift.
+    await expect(
+      context.invoke("model.request", {
+        sessionID: "root",
+        model: { id: "m1", providerID: "prov" },
+        kind: "primary",
+      }),
+    ).rejects.toThrow(/does not match/);
+    await registration.dispose();
+  });
+
+  test("a pump-missed user choice closes the first-work window before its dispatch", async () => {
+    await isolateDataHome();
+    const project = await createProject({ default: "prov/m1#fast" });
+    const context = new FakeNativeContext(project);
+    const host = new FakeRuntimeHost(context);
+    const model = context.addModel("prov", "m1");
+    model.variants.push({ id: Model.VariantID.make("fast"), settings: { temperature: 0.2 } });
+    context.setDefault("prov", "m1");
+    makeBoundSession(context, "root");
+
+    const registration = await registerModelRoles(context, {
+      enabled: true,
+      runtimeDeps: host.createDeps(),
+    });
+    // First work binds and switches, arming the one-shot window; no guarded
+    // dispatch has happened yet, so the window is still open here.
+    await promptWork(context, "root");
+    expect(context.switchCalls).toHaveLength(1);
+
+    // A user choice the event pump missed: the session model changed outside
+    // our own switch with no model-selected event. bindFor must record it as
+    // an explicit selection and end the first-work tolerance with it.
+    context.sessionModels.set("root", { providerID: "prov", modelID: "m1" });
+    await promptWork(context, "root");
+    // An explicit choice is never re-switched by role overriding.
+    expect(context.switchCalls).toHaveLength(1);
+
+    // The bare-base dispatch is genuine drift now: an explicit choice resolves
+    // qualified after the first-work switch, so the closed window must refuse.
     await expect(
       context.invoke("model.request", {
         sessionID: "root",

@@ -24,8 +24,8 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [Direct fix - First-work admission tolerance: the host may resolve a dispatch against the unqualified role base before the prompt hook's binding switch lands, so the guard now accepts that one bare-base resolution for a session this runtime just bound and switched, instead of killing the session's first turn with SnapshotAdmissionError.]
-//   PREVIOUS: [C-SNAPSHOT-ANCHORING-REDESIGN T-004/T-005/T-008 - Replaced candidate acceptance with durable bind-on-first-work, runtime rehydration of credential-free bindings, live overlay materialization, explicit-selection qualification that matches the host-resolved family variant, native session-deletion cleanup.]
+//   LAST_CHANGE: [Direct fix follow-up - The pump-missed user-choice capture in bindFor now ends the first-work tolerance too, keeping every explicit-choice path symmetric with the event pump so a stale window can never admit a later bare-base dispatch.]
+//   PREVIOUS: [Direct fix - First-work admission tolerance: the host may resolve a dispatch against the unqualified role base before the prompt hook's binding switch lands, so the guard now accepts that one bare-base resolution for a session this runtime just bound and switched, instead of killing the session's first turn with SnapshotAdmissionError.]
 // END_CHANGE_SUMMARY
 
 import { randomBytes } from "node:crypto";
@@ -1230,6 +1230,10 @@ function initializeNativeSnapshotRuntime<Client extends NativeForkClient>(
             !sameModelSelection(sessionModel, pluginSwitch)
           ) {
             state.explicitSelections.set(sessionID, normalizeModelSelection(sessionModel));
+            // Every recorded user choice ends the first-work tolerance, exactly
+            // like the event-pump path: a later bare-base dispatch is genuine
+            // drift again, never silently admitted through a stale window.
+            state.firstWorkPending.delete(sessionID);
           }
           if (!state.roleOverride || state.explicitSelections.has(sessionID)) return;
           const target = expectedForSession(existing, view.agent, sessionID);

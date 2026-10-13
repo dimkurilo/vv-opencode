@@ -673,7 +673,7 @@ export const coreCases: readonly CoreCase[] = [
     id: "implicit-first-turn",
     title: "Sessions without agent or model complete their first turn on the family variant",
     phase: "T-003",
-    parity: ["plugin.model-roles.admission", "runtime.admission"],
+    parity: ["plugin.model-roles.admission"],
     async run(driver, check) {
       // The API/SDK shape: location-only create, no agent, no model. The host may
       // resolve the first dispatch before the binding switch lands, so this case
