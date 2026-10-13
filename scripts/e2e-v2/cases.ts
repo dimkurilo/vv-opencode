@@ -3,7 +3,7 @@
 // VERSION: 2.0.0
 // START_MODULE_CONTRACT
 //   PURPOSE: Define the core real-host acceptance cases and their observed, per-request-attributed assertions for the packed native model-role runtime.
-//   SCOPE: Case descriptors, the driver contract, a bounded assertion collector, and executable cases for activation/guards, awaited admission with zero-dispatch rejection, captured source variants with native registry readback, auxiliary title with zero native title dispatch, config mutation, owned generate/synthetic and raw-unbound refusal, explicit selection, fork/worktree lineage, resource permission guard effects, and a hook-availability probe. Assertions are attributed to the exact current session/request via the provider payload markers and hosted session id.
+//   SCOPE: Case descriptors, the driver contract, a bounded assertion collector, and executable cases for activation/guards, awaited admission with zero-dispatch rejection, captured source variants with native registry readback, auxiliary title with zero native title dispatch, config mutation, owned generate/synthetic and raw-unbound refusal, explicit selection, implicit (no agent/model) first-turn admission, fork/worktree lineage, resource permission guard effects, and a hook-availability probe. Assertions are attributed to the exact current session/request via the provider payload markers and hosted session id.
 //   DEPENDS: [scripts/e2e-v2/host.ts, scripts/e2e-v2/provider.ts, scripts/e2e-v2/fixtures/plugin.ts]
 //   LINKS: [M-E2E-V2-HARNESS, V-M-E2E-V2-HARNESS]
 //   ROLE: SCRIPT
@@ -32,7 +32,8 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [C-OPENCODE-V2-NATIVE T-003 correction - Per-request attribution, zero-dispatch rejection, guard effects, owned generate/synthetic, explicit selection, fork/worktree, and native registry readback.]
+//   LAST_CHANGE: [Direct fix - Added the implicit-first-turn core case: a location-only session (no agent, no model) must complete its first turn on the family-qualified variant, with explicit-agent and explicit-model creation controls.]
+//   PREVIOUS: [C-OPENCODE-V2-NATIVE T-003 correction - Per-request attribution, zero-dispatch rejection, guard effects, owned generate/synthetic, explicit selection, fork/worktree, and native registry readback.]
 // END_CHANGE_SUMMARY
 
 import type { ProviderRequestRecord } from "./provider.js";
@@ -664,6 +665,93 @@ export const coreCases: readonly CoreCase[] = [
         observed: {
           createVariant: createInfo?.model?.variant,
           switchVariant: switchInfo?.model?.variant,
+        },
+      };
+    },
+  },
+  {
+    id: "implicit-first-turn",
+    title: "Sessions without agent or model complete their first turn on the family variant",
+    phase: "T-003",
+    parity: ["plugin.model-roles.admission"],
+    async run(driver, check) {
+      // The API/SDK shape: location-only create, no agent, no model. The host may
+      // resolve the first dispatch before the binding switch lands, so this case
+      // locks the user-visible contract: the first turn succeeds on the family
+      // variant, in every creation shape.
+      const implicit = await driver.createSession();
+      await delay(1200);
+      const implicitPrevIdle = (await driver.sessionInfo(implicit))?.time?.idle;
+      const implicitMarker = nextMarker("implicit");
+      const implicitBase = await driver.providerCount();
+      await driver.prompt(implicit, implicitMarker);
+      const implicitInfo = await driver.waitIdleChange(implicit, implicitPrevIdle);
+      await delay(500);
+      check.equal(
+        (await driver.sessionInfo(implicit))?.outcome,
+        "succeeded",
+        "a location-only session completes its first turn",
+      );
+      check.truthy(
+        qualifiedSuffix(implicitInfo?.model?.variant, ".seam-smart.override"),
+        `the implicit session carries the family-qualified variant (${implicitInfo?.model?.variant})`,
+      );
+      check.truthy(
+        (await driver.providerRequestsSince(implicitBase)).some(
+          (record) =>
+            attributedSessionID(record) === implicit &&
+            containsMarker(record, implicitMarker) &&
+            payloadFields(record).smoke_variant === "override",
+        ),
+        "the implicit first turn dispatched the family-qualified payload",
+      );
+
+      // Control: an explicit agent at create keeps working unchanged.
+      const agentSession = await driver.createSession({ agent: "vv-controller" });
+      await delay(1200);
+      const agentPrevIdle = (await driver.sessionInfo(agentSession))?.time?.idle;
+      const agentMarker = nextMarker("implicit-agent");
+      await driver.prompt(agentSession, agentMarker);
+      const agentInfo = await driver.waitIdleChange(agentSession, agentPrevIdle);
+      await delay(500);
+      check.equal(
+        (await driver.sessionInfo(agentSession))?.outcome,
+        "succeeded",
+        "an explicit-agent session completes its first turn",
+      );
+      check.truthy(
+        qualifiedSuffix(agentInfo?.model?.variant, ".seam-smart.override") ||
+          agentInfo?.model?.variant === "override",
+        `the explicit-agent session kept its agent model selection (${agentInfo?.model?.variant})`,
+      );
+
+      // Control: a fully qualified explicit model at create keeps working unchanged.
+      const modelSession = await driver.createSession({
+        model: { providerID: "loopback", id: "seam-smart", variant: "override" },
+      });
+      await delay(1200);
+      const modelPrevIdle = (await driver.sessionInfo(modelSession))?.time?.idle;
+      const modelMarker = nextMarker("implicit-model");
+      await driver.prompt(modelSession, modelMarker);
+      const modelInfo = await driver.waitIdleChange(modelSession, modelPrevIdle);
+      await delay(500);
+      check.equal(
+        (await driver.sessionInfo(modelSession))?.outcome,
+        "succeeded",
+        "an explicit-model session completes its first turn",
+      );
+      check.truthy(
+        qualifiedSuffix(modelInfo?.model?.variant, ".seam-smart.override") ||
+          modelInfo?.model?.variant === "override",
+        `the explicit-model session kept its qualified selection (${modelInfo?.model?.variant})`,
+      );
+      return {
+        detail:
+          "location-only, explicit-agent, and explicit-model sessions all completed their first turn",
+        observed: {
+          implicit: implicitInfo?.model?.variant,
+          agent: agentInfo?.model?.variant,
+          model: modelInfo?.model?.variant,
         },
       };
     },
