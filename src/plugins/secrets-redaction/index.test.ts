@@ -1,7 +1,7 @@
 // FILE: src/plugins/secrets-redaction/index.test.ts
 // VERSION: 2.0.0
 // START_MODULE_CONTRACT
-//   PURPOSE: Native-boundary behavioral tests for the SecretsRedactionPlugin handlers: context redaction including configured and placeholder-resolved web apiKey values, tool-part payload redaction, http.response stream restoration, tool-input restoration including deep-frozen host inputs, strict per-family disabled/unknown policy behavior, and per-native-session WebSocket framing lifecycle (handshake discard, abandoned-stream isolation, same-family session independence, production hook registration).
+//   PURPOSE: Native-boundary behavioral tests for the SecretsRedactionPlugin handlers: context redaction including configured and placeholder-resolved web apiKey values, tool-part payload redaction, http.response stream restoration, tool-input restoration including deep-frozen host inputs, strict per-family disabled/unknown policy behavior, and per-native-session WebSocket framing lifecycle (handshake discard, abandoned-stream isolation, same-family session independence, production hook registration). An optional pinned 2.0.18 host smoke proves the built plugin end to end: the same-context composite and the secrets-first distinct-context subpath registration (the T009 aggregate mode) both complete a turn with redact -> restore evidence and no admission failure.
 //   SCOPE: Invoke the native hook handlers with pinned message/system/stream shapes through createSecretsRedactionRegistration with an injected strict family policy resolver; pure web apiKey rule tests are retained.
 //   DEPENDS: bun:test, src/lib/vvoc-config.ts, src/plugins/secrets-redaction/config.ts, src/plugins/secrets-redaction/index.ts
 //   LINKS: [M-PLUGIN-SECRETS-REDACTION, V-M-PLUGIN-SECRETS-REDACTION]
@@ -33,7 +33,7 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [C-OPENCODE-V2-NATIVE T-009-SECRETS - Added deep-frozen tool-input regressions: array and nested-object restore through toolBefore, no-placeholder equivalent copy, cyclic input cycle preservation, and frozen tool-call redaction all assert the host-provided original is never mutated and the handler rebinds to an owned copy. Prior MID-REPAIR-2: per-native-session WebSocket framing regressions (handshake discard, abandoned-stream isolation, >512-session same-family fan-out, independent framing, production hook registration).]
+//   LAST_CHANGE: [C-OPENCODE-V2-NATIVE T-009-SECRETS - Reconciled the distinct-context real-host smoke with the pinned 2.0.18 host: the T-009 cross-context coordination publishes the family capture exactly once across subpath-registered contexts, so secrets-first distinct contexts now complete a turn with full redact -> restore evidence and no SnapshotAdmissionError; the test asserts the reconciled succeeded outcome instead of the pre-coordination failure. Prior T-009-SECRETS: deep-frozen tool-input regressions (array and nested-object restore through toolBefore, no-placeholder equivalent copy, cyclic input cycle preservation, and frozen tool-call redaction all assert the host-provided original is never mutated and the handler rebinds to an owned copy); earlier MID-REPAIR-2: per-native-session WebSocket framing regressions.]
 // END_CHANGE_SUMMARY
 
 import { describe, expect, test } from "bun:test";
@@ -957,11 +957,15 @@ realHostDescribe("real OpenCode 2.0.18 host smoke (built secrets-redaction)", ()
     }
   }, 120_000);
 
-  test("distinct-context subpath registration (secrets-first): preserves core failure evidence for T009", async () => {
+  test("distinct-context subpath registration (secrets-first): T009 aggregate mode succeeds with redaction evidence", async () => {
     // Distinct Plugin.Context objects (separately registered subpath packages)
-    // are the not-yet-reconciled T009 aggregate mode. Registration order matters:
-    // secrets-before-model-roles reproduces the failure; the same-context
-    // composite above succeeds. Core snapshot-service keying is read-only here.
+    // exercise the T009 aggregate mode across context boundaries. Drift note:
+    // an earlier revision of this test expected outcome "failed" plus a
+    // SnapshotAdmissionError, documenting the pre-coordination state where each
+    // distinct context raced its own family capture. The T-009 coordination
+    // (app/location-identity coordinator plus the shared per-family publication
+    // lock) reconciled the aggregate mode, and the pinned 2.0.18 host completes
+    // the secrets-first distinct-context turn: redaction must hold end to end.
     const scenario = await startScenario([
       {
         name: "secrets",
@@ -976,11 +980,14 @@ realHostDescribe("real OpenCode 2.0.18 host smoke (built secrets-redaction)", ()
       const sessionID = await scenario.createSession();
       await prompt(scenario, sessionID);
       const entries = await scenario.waitForTurn(sessionID);
-      expect(entries.find((entry) => entry.type === "idle")?.outcome).toBe("failed");
+      expect(entries.find((entry) => entry.type === "idle")?.outcome).toBe("succeeded");
       await new Promise((resolve) => setTimeout(resolve, 1500));
       const hostLog = await readFile(scenario.hostLogPath, "utf8").catch(() => "");
-      expect(hostLog).toContain("SnapshotAdmissionError");
-      expect(hostLog).toContain("does not match the captured family selection");
+      expect(hostLog).not.toContain("SnapshotAdmissionError");
+      const trace = await readFile(scenario.tracePath, "utf8").catch(() => "");
+      expect(trace).toContain(smokePlaceholder());
+      expect(trace).not.toContain(SMOKE_SECRET);
+      expect(assistantText(entries)).toContain(SMOKE_SECRET);
     } finally {
       scenario.stop();
       await rm(scenario.root, { recursive: true, force: true });
