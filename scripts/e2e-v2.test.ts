@@ -19,7 +19,7 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-[Direct fix - Added regression coverage that default core/full evidence paths and the full run's core-tier evidence path resolve under the harness scratch base and never inside the workspace `.grace/changes/` tree.]
+//   [Direct fix - Added regression coverage that default core/full evidence paths and the full run's core-tier evidence path resolve under the harness scratch base and never inside the workspace `.grace/changes/` tree.]
 //   [Direct fix - Covered the packed-version semver pattern: stable, prerelease, and build-suffixed versions pass while malformed versions fail.]
 // END_CHANGE_SUMMARY
 
