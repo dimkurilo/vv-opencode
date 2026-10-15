@@ -33,7 +33,7 @@ permission behavior.
 | Host SHA-256 | `10d405161d8b9595f4a2ec31254e961969e6ca3f8239ac9bd55b6ff6431dc24f` |
 | Host source commit | `cd9a14a6b688d4021bee381dfd39d2cef9c0f862` |
 | Host version | `2.0.18` |
-| Evidence | `.grace/changes/active/C-OPENCODE-V2-NATIVE/core-evidence.json` |
+| Evidence | `vvoc-e2e-evidence/core-evidence.json` under the scratch base (default `/tmp/opencode`), outside the workspace |
 | Parity inventory | `scripts/e2e-v2/parity.json` |
 
 Override the binary with `VVOC_E2E_V2_HOST`; override the scratch root with
@@ -68,10 +68,10 @@ aggregate on the real host: system-context injection, provider-reported
 analytics usage, peak-hours primary-dispatch gating, real WebSocket transport
 observation, and a native tool control plane (scripted loopback tool calls plus
 native permission deny/allow) for permission-before-network rows. `--full` runs
-all tiers, resolves every parity row, writes
-`.grace/changes/active/C-OPENCODE-V2-NATIVE/parity-evidence.json`, and exits
-non-zero while any mandatory parity row is unverified. A reduced matrix is never
-reported as full parity.
+all tiers, resolves every parity row, writes `parity-evidence.json` under the
+harness scratch base (`vvoc-e2e-evidence/`, never inside the workspace), and
+exits non-zero while any mandatory parity row is unverified. A reduced matrix is
+never reported as full parity.
 
 ## Installed artifact
 

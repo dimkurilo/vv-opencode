@@ -2,7 +2,7 @@
 // VERSION: 2.0.0
 // START_MODULE_CONTRACT
 //   PURPOSE: Verify the v2 harness mode contract, scratch and process safety guards, allow-listed environments, parity inventory shape, installed-artifact full-runner row gating and evidence, and that the fixture plugin forwards to the real runtime with mandatory guards and correct cleanup.
-//   SCOPE: Argument parsing, full/TUI refusal, missing-host refusal, injected core exit codes, installed-artifact parity-row outcomes and mandatory-row failures, loopback/scratch/cleanup guards, actual scratch creation and removal, env allow-list and redaction, live-handle owner refusal, parity.json vocabulary, packed-version semver pattern, fixture guard forwarding and failure cleanup.
+//   SCOPE: Argument parsing, full/TUI refusal, missing-host refusal, injected core exit codes, installed-artifact parity-row outcomes and mandatory-row failures, default evidence-path placement outside the workspace GRACE tree, loopback/scratch/cleanup guards, actual scratch creation and removal, env allow-list and redaction, live-handle owner refusal, parity.json vocabulary, packed-version semver pattern, fixture guard forwarding and failure cleanup.
 //   DEPENDS: [bun:test, node:fs/promises, node:os, node:path, scripts/e2e-v2.ts, scripts/e2e-v2/cases.ts, scripts/e2e-v2/full.ts, scripts/e2e-v2/full-cases.ts, scripts/e2e-v2/fixtures/plugin.ts, scripts/e2e-v2/host.ts]
 //   LINKS: [M-E2E-V2-HARNESS, V-M-E2E-V2-HARNESS]
 //   ROLE: TEST
@@ -19,8 +19,8 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [Direct fix - Covered the packed-version semver pattern: stable, prerelease, and build-suffixed versions pass while malformed versions fail.]
-//   PREVIOUS: [C-OPENCODE-V2-NATIVE T-003 correction - Added real scratch removal guards, env redaction, exited-handle refusal, and fixture failure-cleanup tests.]
+[Direct fix - Added regression coverage that default core/full evidence paths and the full run's core-tier evidence path resolve under the harness scratch base and never inside the workspace `.grace/changes/` tree.]
+//   [Direct fix - Covered the packed-version semver pattern: stable, prerelease, and build-suffixed versions pass while malformed versions fail.]
 // END_CHANGE_SUMMARY
 
 import { afterEach, describe, expect, test } from "bun:test";
@@ -28,6 +28,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs, runCli } from "./e2e-v2.js";
+import { defaultEvidencePath } from "./e2e-v2/core.js";
 import { PACKED_SEMVER_PATTERN } from "./e2e-v2/cases.js";
 import { createHarnessPlugin } from "./e2e-v2/fixtures/plugin.js";
 import {
@@ -283,6 +284,57 @@ describe("harness argument and mode contract", () => {
       runCore: async () => ({ ok: true, cases: [] }),
     });
     expect(status).toBe(0);
+  });
+
+  test("defaultEvidencePath stays under the scratch base and out of the GRACE tree", () => {
+    const path = defaultEvidencePath("/tmp/opencode", "core-evidence.json");
+    expect(path).toBe(join("/tmp/opencode", "vvoc-e2e-evidence", "core-evidence.json"));
+    expect(path.includes(join(".grace", "changes"))).toBe(false);
+  });
+
+  test("core mode resolves the default evidence path outside the workspace GRACE tree", async () => {
+    const dir = await scratch();
+    let seen: string | undefined;
+    const status = await runCli(["--core"], {
+      workspaceRoot: process.cwd(),
+      hostBinary: "/fake/opencode",
+      scratchBase: dir,
+      stdout: () => undefined,
+      runCore: async (options) => {
+        seen = options.evidencePath;
+        return { ok: true, cases: [], evidencePath: options.evidencePath };
+      },
+    });
+    expect(status).toBe(0);
+    expect(seen).toBeDefined();
+    expect(seen?.startsWith(join(dir, "vvoc-e2e-evidence"))).toBe(true);
+    expect(seen?.endsWith("core-evidence.json")).toBe(true);
+    expect(seen?.includes(join(".grace", "changes"))).toBe(false);
+    expect(seen?.startsWith(process.cwd())).toBe(false);
+  });
+
+  test("full mode resolves the default parity evidence path outside the workspace GRACE tree", async () => {
+    const dir = await scratch();
+    let seen: string | undefined;
+    const status = await runCli(["--full"], {
+      workspaceRoot: process.cwd(),
+      hostBinary: "/fake/opencode",
+      scratchBase: dir,
+      stdout: () => undefined,
+      runCore: async () => {
+        throw new Error("runCore must not be called directly in full mode");
+      },
+      runFull: async (options) => {
+        seen = options.evidencePath;
+        return { ok: true, rows: [], failures: [], evidencePath: options.evidencePath };
+      },
+    });
+    expect(status).toBe(0);
+    expect(seen).toBeDefined();
+    expect(seen?.startsWith(join(dir, "vvoc-e2e-evidence"))).toBe(true);
+    expect(seen?.endsWith("parity-evidence.json")).toBe(true);
+    expect(seen?.includes(join(".grace", "changes"))).toBe(false);
+    expect(seen?.startsWith(process.cwd())).toBe(false);
   });
 });
 
@@ -617,6 +669,41 @@ describe("full installed-artifact parity runner", () => {
     );
     expect(summary.ok).toBe(false);
     expect(summary.error).toContain("pinned host is unavailable");
+  });
+
+  test("the core tier inside a full run records evidence outside the workspace GRACE tree", async () => {
+    const dir = await scratch();
+    let coreEvidencePath: string | undefined;
+    const summary = await runFull(
+      {
+        workspaceRoot: process.cwd(),
+        hostBinary: "/tmp/pinned-opencode",
+        scratchBase: dir,
+        evidencePath: join(dir, "parity-evidence.json"),
+      },
+      {
+        runCore: async (options) => {
+          coreEvidencePath = options.evidencePath;
+          return { ok: true, cases: [], tarballSha256: "deadbeef" };
+        },
+        runTui: async () => ({
+          ok: true,
+          implemented: true,
+          sourceCommit: "x",
+          scenarios: [],
+          note: "ok",
+        }),
+        hostSha256: async () => "host-hash",
+        writeEvidence: async () => undefined,
+      },
+    );
+    expect(coreEvidencePath).toBeDefined();
+    expect(coreEvidencePath?.startsWith(join(dir, "vvoc-e2e-evidence"))).toBe(true);
+    expect(coreEvidencePath?.endsWith("core-evidence.json")).toBe(true);
+    expect(coreEvidencePath?.includes(join(".grace", "changes"))).toBe(false);
+    expect(coreEvidencePath?.startsWith(process.cwd())).toBe(false);
+    // The full-run summary still reports the injected parity evidence path.
+    expect(summary.evidencePath).toBe(join(dir, "parity-evidence.json"));
   });
 
   test("the CLI --full mode returns nonzero when mandatory rows are unverified", async () => {
