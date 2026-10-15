@@ -17,6 +17,7 @@
 //   CoreDriver - Host/profile operations the cases use; implemented by the runner.
 //   CoreCase - One executable core acceptance case descriptor.
 //   coreCases - Ordered core acceptance cases.
+//   PACKED_SEMVER_PATTERN - Semver pattern (prerelease/build allowed) that the packed artifact version must match.
 //   ORDERING_DELAY_MARKER - Marker that makes the fixture delay native preparation after the real prompt hook.
 //   delay - Promise-based millisecond delay used by permission polling.
 //   markerSeq - Monotonic counter making case markers unique within a run.
@@ -32,7 +33,7 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [Direct fix - Added the implicit-first-turn core case: a location-only session (no agent, no model) must complete its first turn on the family-qualified variant, with explicit-agent and explicit-model creation controls.]
+//   LAST_CHANGE: [Direct fix - Accepted prerelease semver in the activation packed-version assertion so the core suite stays green across the rc release cycle.]
 //   PREVIOUS: [C-OPENCODE-V2-NATIVE T-003 correction - Per-request attribution, zero-dispatch rejection, guard effects, owned generate/synthetic, explicit selection, fork/worktree, and native registry readback.]
 // END_CHANGE_SUMMARY
 
@@ -152,6 +153,13 @@ export interface CoreCase {
 /** Marker that makes the fixture delay native preparation after the real prompt hook. */
 export const ORDERING_DELAY_MARKER = "__vvoc_e2e_delay__";
 
+/**
+ * Semver pattern the packed artifact version must match: same shape as the release
+ * tooling's pattern, so stable and prerelease (rc) versions both pass.
+ */
+export const PACKED_SEMVER_PATTERN =
+  /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+
 const delay = (ms: number) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 let markerSeq = 0;
 const nextMarker = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${(markerSeq += 1)}`;
@@ -249,7 +257,7 @@ export const coreCases: readonly CoreCase[] = [
       );
       check.equal(status.body.pluginID, "vvoc.e2e.fixture", "fixture plugin id is stable");
       check.truthy(
-        /^\d+\.\d+\.\d+$/.test(driver.packedVersion),
+        PACKED_SEMVER_PATTERN.test(driver.packedVersion),
         `packed package exposes a semver version (${driver.packedVersion})`,
       );
       check.equal(
