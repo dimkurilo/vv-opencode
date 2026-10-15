@@ -2,8 +2,8 @@
 // VERSION: 2.0.0
 // START_MODULE_CONTRACT
 //   PURPOSE: Verify the v2 harness mode contract, scratch and process safety guards, allow-listed environments, parity inventory shape, installed-artifact full-runner row gating and evidence, and that the fixture plugin forwards to the real runtime with mandatory guards and correct cleanup.
-//   SCOPE: Argument parsing, full/TUI refusal, missing-host refusal, injected core exit codes, installed-artifact parity-row outcomes and mandatory-row failures, loopback/scratch/cleanup guards, actual scratch creation and removal, env allow-list and redaction, live-handle owner refusal, parity.json vocabulary, fixture guard forwarding and failure cleanup.
-//   DEPENDS: [bun:test, node:fs/promises, node:os, node:path, scripts/e2e-v2.ts, scripts/e2e-v2/full.ts, scripts/e2e-v2/full-cases.ts, scripts/e2e-v2/fixtures/plugin.ts, scripts/e2e-v2/host.ts]
+//   SCOPE: Argument parsing, full/TUI refusal, missing-host refusal, injected core exit codes, installed-artifact parity-row outcomes and mandatory-row failures, loopback/scratch/cleanup guards, actual scratch creation and removal, env allow-list and redaction, live-handle owner refusal, parity.json vocabulary, packed-version semver pattern, fixture guard forwarding and failure cleanup.
+//   DEPENDS: [bun:test, node:fs/promises, node:os, node:path, scripts/e2e-v2.ts, scripts/e2e-v2/cases.ts, scripts/e2e-v2/full.ts, scripts/e2e-v2/full-cases.ts, scripts/e2e-v2/fixtures/plugin.ts, scripts/e2e-v2/host.ts]
 //   LINKS: [M-E2E-V2-HARNESS, V-M-E2E-V2-HARNESS]
 //   ROLE: TEST
 //   MAP_MODE: LOCALS
@@ -19,7 +19,7 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [C-OPENCODE-V2-NATIVE T-009 - Covered the installed-artifact full runner: installed-tier row mapping, mandatory-row gating, evidence totals, and the CLI --full exit behavior.]
+//   LAST_CHANGE: [Direct fix - Covered the packed-version semver pattern: stable, prerelease, and build-suffixed versions pass while malformed versions fail.]
 //   PREVIOUS: [C-OPENCODE-V2-NATIVE T-003 correction - Added real scratch removal guards, env redaction, exited-handle refusal, and fixture failure-cleanup tests.]
 // END_CHANGE_SUMMARY
 
@@ -28,6 +28,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs, runCli } from "./e2e-v2.js";
+import { PACKED_SEMVER_PATTERN } from "./e2e-v2/cases.js";
 import { createHarnessPlugin } from "./e2e-v2/fixtures/plugin.js";
 import {
   buildParityEvidence,
@@ -351,6 +352,17 @@ describe("isolation guards", () => {
     expect(packedArtifactIssues(complete, { name: "x", version: "1" })).toEqual([]);
     const incomplete = packedArtifactIssues(["package/package.json"], { name: "x", version: "1" });
     expect(incomplete.length).toBeGreaterThan(0);
+  });
+
+  test("the packed-version pattern accepts stable and prerelease semver only", () => {
+    expect(PACKED_SEMVER_PATTERN.test("2.3.0")).toBe(true);
+    expect(PACKED_SEMVER_PATTERN.test("2.3.0-rc.0")).toBe(true);
+    expect(PACKED_SEMVER_PATTERN.test("2.3.0-rc.8")).toBe(true);
+    expect(PACKED_SEMVER_PATTERN.test("2.3.0+build.1")).toBe(true);
+    expect(PACKED_SEMVER_PATTERN.test("unknown")).toBe(false);
+    expect(PACKED_SEMVER_PATTERN.test("")).toBe(false);
+    expect(PACKED_SEMVER_PATTERN.test("2.3")).toBe(false);
+    expect(PACKED_SEMVER_PATTERN.test("v2.3.0")).toBe(false);
   });
 
   test("owned processes refuse foreign and exited pids", async () => {
