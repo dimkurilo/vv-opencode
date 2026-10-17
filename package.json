@@ -102,7 +102,7 @@
     }
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && mkdir -p dist/plugins/workflow && cp src/plugins/workflow/system-instruction.md dist/plugins/workflow/system-instruction.md",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && bun scripts/copy-dist-assets.ts",
     "prepublishOnly": "bun run build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "oxlint --deny warnings src",

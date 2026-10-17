@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 // FILE: scripts/check-package.ts
-// VERSION: 1.0.0
+// VERSION: 1.1.0
 // START_MODULE_CONTRACT
 //   PURPOSE: Manifest-driven package-surface gate: verify every declared export loads a native entry and that the actual packed tarball contains every required public artifact.
-//   SCOPE: Pure manifest/entry/tarball assertions over injectable import and pack functions, plus a disk-backed CLI that builds nothing, packs with script suppression, and imports each dist export. It asserts native {id, setup|effect} shape for the root aggregate, the TUI default, and every standalone plugin subpath, requires the V1 SDK to be absent, and includes ToolHistoryCompaction in the required plugin set.
-//   DEPENDS: [node:fs, node:path, node:child_process, node:os]
+//   SCOPE: Pure manifest/entry/tarball/asset assertions over injectable import, pack, list, and directory-walk functions, plus a disk-backed CLI that builds nothing, packs with script suppression, imports each dist export, and requires every non-TS src asset to exist in dist at the mirrored path. It asserts native {id, setup|effect} shape for the root aggregate, the TUI default, and every standalone plugin subpath, requires the V1 SDK to be absent, and includes ToolHistoryCompaction in the required plugin set.
+//   DEPENDS: [node:fs, node:path, node:child_process, node:os, scripts/copy-dist-assets]
 //   LINKS: [M-AGENT-TOOL-CONTRACT, V-M-AGENT-TOOL-CONTRACT]
 //   ROLE: SCRIPT
 //   MAP_MODE: LOCALS
@@ -13,7 +13,7 @@
 // START_MODULE_MAP
 //   execFileAsync - Promisified child_process.execFile used for the pack and list commands.
 //   PackageManifest - Minimal package.json view needed by the pack gate.
-//   PackDependencies - Injectable import/pack/list dependencies used by tests and the real entry.
+//   PackDependencies - Injectable import/pack/list/asset dependencies used by tests and the real entry.
 //   PLUGIN_EXPORT_NAME_ALIASES - Subpaths whose canonical plugin export name differs from the derived form.
 //   nativeEntryIssue - Assert one module value is a native {id, setup|effect} entry.
 //   pluginExportName - Derive the named plugin export from a plugin subpath.
@@ -24,13 +24,15 @@
 //   manifestIssues - Package manifest identity/dependency failures.
 //   expectedTarballEntries - Required packed entries derived from the manifest exports.
 //   verifyTarballEntries - Report missing required packed entries.
+//   distMirrorPath - Map one repo-root-relative src asset path to its mirrored dist path.
+//   verifyAssetMirror - Report src non-TS assets missing from the mirrored dist tree.
 //   readManifest - Read and parse the repository package.json manifest.
 //   runPackageCheck - Full read-only package check over injectable dependencies.
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [C-TELEGRAM-BRIDGE-PLUGIN T-009 - Added the telegram subpath export-name alias so the pack gate verifies the TelegramBridgePlugin entry.]
-//   PREVIOUS: [C-OPENCODE-V2-NATIVE T-009 - Replaced the inline root-export snippet that omitted ToolHistoryCompaction and never inspected the tarball with a manifest-driven export/entry/tarball gate that covers every plugin, the native aggregate default, the TUI default, and the packed artifact contents.]
+//   LAST_CHANGE: [DIRECT-FIX - Added the src-to-dist asset-mirror gate so a non-TS src asset missing from dist fails the package check naming the file, and injected asset listings into PackDependencies.]
+//   PREVIOUS: [C-TELEGRAM-BRIDGE-PLUGIN T-009 - Added the telegram subpath export-name alias so the pack gate verifies the TelegramBridgePlugin entry.]
 // END_CHANGE_SUMMARY
 
 import { execFile } from "node:child_process";
@@ -39,6 +41,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import { listDirectoryFilePaths, listSourceAssetPaths } from "./copy-dist-assets.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -52,11 +55,13 @@ export interface PackageManifest {
   readonly devDependencies?: Readonly<Record<string, string>>;
 }
 
-/** Injectable import/pack/list dependencies used by tests and the real entry. */
+/** Injectable import/pack/list/asset dependencies used by tests and the real entry. */
 export interface PackDependencies {
   readonly importModule: (specifier: string) => Promise<Record<string, unknown>>;
   readonly packTarball: () => Promise<string>;
   readonly listTarballEntries: (tarballPath: string) => Promise<string[]>;
+  readonly listSourceAssets: () => Promise<string[]>;
+  readonly listDistAssets: () => Promise<string[]>;
 }
 
 // START_BLOCK_ASSERTIONS
@@ -204,6 +209,27 @@ export function verifyTarballEntries(
 }
 // END_BLOCK_MANIFEST
 
+// START_BLOCK_ASSET_MIRROR
+/** Map one repo-root-relative src asset path to its mirrored dist path. */
+export function distMirrorPath(asset: string): string {
+  return asset.replace(/^src\//, "dist/");
+}
+
+/** Report src non-TS assets missing from the mirrored dist tree. */
+export function verifyAssetMirror(
+  sourceAssets: readonly string[],
+  distEntries: readonly string[],
+): string[] {
+  const present = new Set(distEntries);
+  return sourceAssets
+    .filter((asset) => !present.has(distMirrorPath(asset)))
+    .map(
+      (asset) =>
+        `src asset ${asset} is not mirrored to dist at ${distMirrorPath(asset)}`,
+    );
+}
+// END_BLOCK_ASSET_MIRROR
+
 // START_BLOCK_CLI
 function readManifest(repoRoot: string): PackageManifest {
   return JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as PackageManifest;
@@ -223,6 +249,10 @@ export async function runPackageCheck(
     deps.importModule ??
     ((specifier: string) => import(specifier) as Promise<Record<string, unknown>>);
   failures.push(...(await verifyPackageExports(manifest, { importModule, distUrl })));
+
+  const listSourceAssets = deps.listSourceAssets ?? (async () => listSourceAssetPaths(repoRoot));
+  const listDistAssets = deps.listDistAssets ?? (async () => listDirectoryFilePaths(repoRoot, "dist"));
+  failures.push(...verifyAssetMirror(await listSourceAssets(), await listDistAssets()));
 
   const scratch = mkdtempSync(join(tmpdir(), "vvoc-pack-check-"));
   try {
