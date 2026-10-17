@@ -1,5 +1,5 @@
 // FILE: src/plugins/web-tools/providers/exa.ts
-// VERSION: 1.0.0
+// VERSION: 1.1.0
 // START_MODULE_CONTRACT
 //   PURPOSE: Call the official Exa Search API directly and normalize ranked results for the web_search tool.
 //   SCOPE: Exa request construction with x-api-key auth, count and freshness mapping, result normalization, and provider error mapping. Also owns the shared provider search types and WebProviderError used by sibling adapters.
@@ -20,7 +20,7 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [C-ZAI-DIRECT-WEB-PROVIDERS - Extended shared provider error attribution with the direct zai adapter.]
+//   LAST_CHANGE: [direct change - Extended shared provider error attribution with an insufficient-balance mapping for HTTP 402 and added deepseek to the provider vocabulary.]
 // END_CHANGE_SUMMARY
 
 import type { WebProviderCredential } from "../config.js";
@@ -32,11 +32,12 @@ import {
   type FetchLike,
 } from "../http.js";
 
-export type WebProviderName = "exa" | "brave" | "spider" | "native" | "zai";
+export type WebProviderName = "exa" | "brave" | "spider" | "native" | "zai" | "deepseek";
 
 export type WebProviderErrorCode =
   | "AUTH_FAILED"
   | "RATE_LIMITED"
+  | "PAYMENT_REQUIRED"
   | "PROVIDER_ERROR"
   | "BAD_RESPONSE"
   | "MISSING_CREDENTIAL"
@@ -102,6 +103,14 @@ export function mapHttpErrorToProviderError(error: unknown, provider: WebProvide
         provider,
         "AUTH_FAILED",
         `${provider} authentication failed`,
+        status,
+      );
+    }
+    if (status === 402) {
+      throw new WebProviderError(
+        provider,
+        "PAYMENT_REQUIRED",
+        `${provider} account balance is insufficient; top up the account before retrying`,
         status,
       );
     }

@@ -1,10 +1,10 @@
 // FILE: src/plugins/web-tools/fetch-service.ts
-// VERSION: 2.1.0
+// VERSION: 2.2.0
 // START_MODULE_CONTRACT
 //   PURPOSE: Build the provider-neutral native web_fetch tool: strict contract validation with explicit execute-time defaults, URL scheme/shape rejection, per-family captured policy/config resolution, awaited resource permission before any network effect, provider dispatch, and structured text or native file-content results.
-//   SCOPE: Native Tool.Info factory plus provider result mapping. Validates raw host-forwarded arguments through the shared web_fetch contract before any permission request, credential lookup, or provider dispatch; awaits a resource-specific permission; delegates retrieval and conversion to the native, Spider, and direct Z.AI adapters. Media attachments map to native Tool file content covering data-URI binary payloads. No V1 ToolDefinition/context.ask, no startup-global toggle.
-//   DEPENDS: [@opencode/plugin/promise/tool, zod, src/lib/agent-tool-contract.ts, src/plugins/web-tools/config.ts, src/plugins/web-tools/schemas.ts, src/plugins/web-tools/search-service.ts (WebPermissionGuard/WebToolsRuntime), src/plugins/web-tools/providers/native-fetch.ts, src/plugins/web-tools/providers/spider.ts, src/plugins/web-tools/providers/zai.ts, src/plugins/web-tools/providers/exa.ts]
-//   LINKS: [M-WEB-FETCH-SERVICE, M-WEB-NATIVE-FETCH, M-WEB-SPIDER, M-WEB-ZAI, M-WEB-MEDIA-LOADER, M-WEB-EXA, M-PLUGIN-WEB-TOOLS, M-AGENT-TOOL-CONTRACT, V-M-WEB-FETCH-SERVICE, DF-WEB-FETCH]
+//   SCOPE: Native Tool.Info factory plus provider result mapping. Validates raw host-forwarded arguments through the shared web_fetch contract before any permission request, credential lookup, or provider dispatch; awaits a resource-specific permission; delegates retrieval and conversion to the native, Spider, direct Z.AI, and direct DeepSeek adapters. Media attachments map to native Tool file content covering data-URI binary payloads. No V1 ToolDefinition/context.ask, no startup-global toggle.
+//   DEPENDS: [@opencode/plugin/promise/tool, zod, src/lib/agent-tool-contract.ts, src/plugins/web-tools/config.ts, src/plugins/web-tools/schemas.ts, src/plugins/web-tools/search-service.ts (WebPermissionGuard/WebToolsRuntime), src/plugins/web-tools/providers/native-fetch.ts, src/plugins/web-tools/providers/spider.ts, src/plugins/web-tools/providers/zai.ts, src/plugins/web-tools/providers/deepseek.ts, src/plugins/web-tools/providers/exa.ts]
+//   LINKS: [M-WEB-FETCH-SERVICE, M-WEB-NATIVE-FETCH, M-WEB-SPIDER, M-WEB-ZAI, M-WEB-DEEPSEEK, M-WEB-MEDIA-LOADER, M-WEB-EXA, M-PLUGIN-WEB-TOOLS, M-AGENT-TOOL-CONTRACT, V-M-WEB-FETCH-SERVICE, DF-WEB-FETCH]
 //   ROLE: RUNTIME
 //   MAP_MODE: EXPORTS
 // END_MODULE_CONTRACT
@@ -19,13 +19,14 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [C-OPENCODE-V2-NATIVE T-005 attempt 2 - Split per-provider execution from a per-session policy resolver so a startup-global toggle can no longer hijack a disabled captured family or block a later enabled one.]
+//   LAST_CHANGE: [direct change - Added the direct DeepSeek fetch dispatch branch returning Markdown page content with status and title metadata.]
 // END_CHANGE_SUMMARY
 
 import { z } from "zod";
 import type { ToolContext as NativeToolContext } from "@opencode/plugin/promise/tool";
 import { ContractInputError, type OwnedToolAttachment } from "../../lib/agent-tool-contract.js";
 import type { ResolvedWebFetchConfig } from "./config.js";
+import { fetchDeepseek, type DeepseekFetchOutcome } from "./providers/deepseek.js";
 import { WebProviderError } from "./providers/exa.js";
 import { fetchNative, type NativeFetchOutcome } from "./providers/native-fetch.js";
 import { scrapeSpider, type SpiderOutcome } from "./providers/spider.js";
@@ -134,6 +135,24 @@ function zaiResult(
   }
   return { output: outcome.content, content: outcome.content, metadata };
 }
+
+function deepseekResult(
+  url: string,
+  format: WebFetchFormat,
+  credentialSource: "env" | "config",
+  outcome: DeepseekFetchOutcome,
+): MappedResult {
+  return {
+    output: outcome.content,
+    content: outcome.content,
+    metadata: {
+      provider: "deepseek",
+      format,
+      credentialSource,
+      ...outcome.metadata,
+    },
+  };
+}
 // END_BLOCK_RESULT_MAPPING
 
 /**
@@ -191,6 +210,15 @@ export async function executeWebFetch(
           timeoutMs,
         });
         return zaiResult(url, format, resolved.region, resolved.credential.source, outcome);
+      }
+      if (resolved.provider === "deepseek") {
+        const outcome = await fetchDeepseek({
+          url,
+          credential: resolved.credential,
+          abort: context.signal,
+          timeoutMs,
+        });
+        return deepseekResult(url, format, resolved.credential.source, outcome);
       }
       const outcome = await scrapeSpider({
         url,

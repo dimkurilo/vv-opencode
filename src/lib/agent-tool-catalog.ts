@@ -35,7 +35,7 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [C-AGENT-TOOL-CONTRACTS T-008 correction r2 - Array-element traversal with finite-primitive (boolean/number) literal discriminators so batch item and nested provider families are coverage-checked; added the batch-failure fixture and the per-operation/branch negative fixtures for review_only, generic open paths, request_changes/rework, verify/review/bind/amend/record_approval/revoke_authority, delete/rename/replace/prepend, and every freshness/format branch. Prior: honest hashline text+metadata aggregate, nested provider coverage, closed-schema scanning, outcome-validated reference examples.]
+//   LAST_CHANGE: [direct change - Added the deepseek provider result fixtures for web_search and web_fetch alongside the existing provider families. Prior: C-AGENT-TOOL-CONTRACTS T-008 correction r2 - Array-element traversal with finite-primitive (boolean/number) literal discriminators so batch item and nested provider families are coverage-checked; added the batch-failure fixture and the per-operation/branch negative fixtures for review_only, generic open paths, request_changes/rework, verify/review/bind/amend/record_approval/revoke_authority, delete/rename/replace/prepend, and every freshness/format branch.]
 // END_CHANGE_SUMMARY
 
 import { z, type ZodRawShape, type ZodType } from "zod";
@@ -1945,6 +1945,19 @@ const webEntries: AgentToolCatalogEntry[] = [
           },
         },
       },
+      {
+        id: "web_search:deepseek",
+        label: "ranked Markdown result from the DeepSeek provider",
+        fixture: {
+          title: "web_search: vvoc",
+          output: "# Results\n\n1. ...",
+          metadata: {
+            provider: "deepseek",
+            resultCount: 4,
+            credentialSource: "env",
+          },
+        },
+      },
     ],
     errors: [
       { path: "count", expectation: "an out-of-range count is rejected before dispatch" },
@@ -2122,6 +2135,21 @@ const webEntries: AgentToolCatalogEntry[] = [
             requestId: "req-1",
             model: "reader",
             created: 1,
+            title: "Example",
+          },
+        },
+      },
+      {
+        id: "web_fetch:text-deepseek",
+        label: "DeepSeek textual result envelope with page metadata",
+        fixture: {
+          title: "web_fetch: https://example.test/page",
+          output: "body",
+          metadata: {
+            provider: "deepseek",
+            format: "markdown",
+            credentialSource: "env",
+            status: 200,
             title: "Example",
           },
         },

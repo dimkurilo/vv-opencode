@@ -1,5 +1,5 @@
 // FILE: src/plugins/web-tools/schemas.ts
-// VERSION: 1.0.0
+// VERSION: 1.1.0
 // START_MODULE_CONTRACT
 //   PURPOSE: Single source of the two vvoc-owned web tool contracts: registered raw argument maps, strict runtime schemas with explicit execute-time defaults, args-only URL/shape validation, model-facing descriptions, operation examples, concrete search/fetch result metadata/attachment producer schemas, and the owned contracts consumed by the definition and pre-execute publication seam.
 //   SCOPE: Pure contract declarations and args-only validation for web_search and web_fetch: unknown-key rejection, provided-value typing/enum/bounds checks, representable URL scheme/shape checks, and closed result-envelope schemas for the actual provider delivery variants. No network I/O, permission request, credential resolution, provider selection, dispatch, or content rewriting; the services keep transport and credential redaction authority.
@@ -50,7 +50,7 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [C-AGENT-TOOL-CONTRACTS T-006 - Initial single-source web input/result contracts with explicit execute-time defaults, URL scheme/shape validation before dispatch, closed provider-variant metadata schemas, and operation examples.]
+//   LAST_CHANGE: [direct change - Added the deepseek provider to the canonical vocabularies and the closed search/fetch metadata variants.]
 // END_CHANGE_SUMMARY
 
 import { z, type ZodRawShape } from "zod";
@@ -76,9 +76,9 @@ export const WEB_SEARCH_TOOL_ID = "web_search";
 export const WEB_FETCH_TOOL_ID = "web_fetch";
 
 /** Canonical search provider vocabulary. */
-export const WEB_SEARCH_PROVIDERS = ["exa", "brave", "zai"] as const;
+export const WEB_SEARCH_PROVIDERS = ["exa", "brave", "zai", "deepseek"] as const;
 /** Canonical fetch provider vocabulary. */
-export const WEB_FETCH_PROVIDERS = ["native", "spider", "zai"] as const;
+export const WEB_FETCH_PROVIDERS = ["native", "spider", "zai", "deepseek"] as const;
 /** Credential provenance vocabulary reported in result metadata. */
 export const WEB_CREDENTIAL_SOURCES = ["env", "config"] as const;
 /** Canonical Z.AI region vocabulary (matches the canonical vvoc web region enum). */
@@ -446,8 +446,8 @@ export function validateWebFetchToolInput(raw: unknown): WebFetchValidation {
 const credentialSourceSchema = schema.enum(WEB_CREDENTIAL_SOURCES);
 const formatSchema = schema.enum(FETCH_FORMATS);
 const regionSchema = schema.enum(WEB_REGIONS);
-const [EXA, BRAVE, ZAI_SEARCH] = WEB_SEARCH_PROVIDERS;
-const [NATIVE, SPIDER, ZAI_FETCH] = WEB_FETCH_PROVIDERS;
+const [EXA, BRAVE, ZAI_SEARCH, DEEPSEEK_SEARCH] = WEB_SEARCH_PROVIDERS;
+const [NATIVE, SPIDER, ZAI_FETCH, DEEPSEEK_FETCH] = WEB_FETCH_PROVIDERS;
 
 /**
  * Closed search metadata schemas for the actual delivery variants.
@@ -471,6 +471,11 @@ export const webSearchMetadataSchema = schema.union([
     resultCount: schema.number().int().min(0),
     credentialSource: credentialSourceSchema,
   }),
+  strictObject({
+    provider: schema.literal(DEEPSEEK_SEARCH),
+    resultCount: schema.number().int().min(0),
+    credentialSource: credentialSourceSchema,
+  }),
 ]);
 
 /**
@@ -488,7 +493,9 @@ export const webSearchResultSchema = strictObject({
  * Closed fetch metadata schemas for the actual provider/delivery variants.
  * Native reports its status; Spider may add status/duration; Z.AI reader text
  * carries its regional request metadata while direct Z.AI media reports only the
- * region/format/credential provenance. Region is required for every Z.AI variant.
+ * region/format/credential provenance. DeepSeek returns Markdown text with its
+ * status and optional page title and never produces attachments. Region is
+ * required for every Z.AI variant.
  */
 export const webFetchMetadataSchema = schema.union([
   strictObject({
@@ -520,6 +527,13 @@ export const webFetchMetadataSchema = schema.union([
     format: formatSchema,
     credentialSource: credentialSourceSchema,
   }),
+  strictObject({
+    provider: schema.literal(DEEPSEEK_FETCH),
+    format: formatSchema,
+    credentialSource: credentialSourceSchema,
+    status: schema.number().int(),
+    title: schema.string().optional(),
+  }),
 ]);
 
 /** Closed textual fetch result envelope producer schema (no attachments region). */
@@ -548,6 +562,13 @@ export const webFetchTextResultSchema = strictObject({
       requestId: schema.string().optional(),
       model: schema.string().optional(),
       created: schema.number().optional(),
+      title: schema.string().optional(),
+    }),
+    strictObject({
+      provider: schema.literal(DEEPSEEK_FETCH),
+      format: formatSchema,
+      credentialSource: credentialSourceSchema,
+      status: schema.number().int(),
       title: schema.string().optional(),
     }),
   ]),

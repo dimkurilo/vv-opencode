@@ -1,5 +1,5 @@
 // FILE: src/plugins/web-tools/config.ts
-// VERSION: 1.0.0
+// VERSION: 1.1.0
 // START_MODULE_CONTRACT
 //   PURPOSE: Resolve the optional vvoc web section into concrete provider choices, explicit Z.AI regions, and credentials for the web tools plugin.
 //   SCOPE: Provider defaults, fail-closed Z.AI region resolution, credential resolution with environment precedence over config apiKey fields including ${VAR} placeholder substitution with unset-reference warnings, credential source reporting, and a best-effort git-tracked project-config warning helper.
@@ -20,7 +20,7 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [direct fix - Resolved ${VAR} env placeholders in web apiKey fields and warned on unset references instead of sending literal placeholder credentials.]
+//   LAST_CHANGE: [direct change - Added the deepseek search and fetch provider with the DEEPSEEK_API_KEY env convention and no region requirement.]
 // END_CHANGE_SUMMARY
 
 import { basename, dirname } from "node:path";
@@ -36,8 +36,8 @@ export type WebProviderCredential = {
 
 export type ResolvedWebSearchConfig =
   | {
-      provider: "exa" | "brave";
-      envVar: "EXA_API_KEY" | "BRAVE_API_KEY";
+      provider: "exa" | "brave" | "deepseek";
+      envVar: "EXA_API_KEY" | "BRAVE_API_KEY" | "DEEPSEEK_API_KEY";
       configField: "web.search.apiKey";
       credential?: WebProviderCredential;
     }
@@ -50,9 +50,9 @@ export type ResolvedWebSearchConfig =
     };
 
 export type ResolvedWebFetchConfig = {
-  provider: "native" | "spider" | "zai";
+  provider: "native" | "spider" | "zai" | "deepseek";
   region?: VvocWebRegion;
-  envVar?: "SPIDER_API_KEY" | "ZAI_API_KEY";
+  envVar?: "SPIDER_API_KEY" | "ZAI_API_KEY" | "DEEPSEEK_API_KEY";
   configField?: "web.fetch.apiKey";
   credential?: WebProviderCredential;
 };
@@ -71,6 +71,13 @@ const SEARCH_ENV_VARS = {
   exa: "EXA_API_KEY",
   brave: "BRAVE_API_KEY",
   zai: "ZAI_API_KEY",
+  deepseek: "DEEPSEEK_API_KEY",
+} as const;
+
+const FETCH_ENV_VARS = {
+  spider: "SPIDER_API_KEY",
+  zai: "ZAI_API_KEY",
+  deepseek: "DEEPSEEK_API_KEY",
 } as const;
 
 // START_BLOCK_CREDENTIAL_RESOLUTION
@@ -164,7 +171,7 @@ export function resolveWebRuntimeConfig(
     fetchProvider === "native"
       ? {}
       : resolveCredential(
-          env[fetchProvider === "zai" ? "ZAI_API_KEY" : "SPIDER_API_KEY"],
+          env[FETCH_ENV_VARS[fetchProvider]],
           web?.fetch?.apiKey,
           env,
           "web.fetch.apiKey",
@@ -189,7 +196,14 @@ export function resolveWebRuntimeConfig(
             configField: "web.fetch.apiKey",
             credential: fetchCredential.credential,
           }
-        : { provider: "native" };
+        : fetchProvider === "deepseek"
+          ? {
+              provider: "deepseek",
+              envVar: "DEEPSEEK_API_KEY",
+              configField: "web.fetch.apiKey",
+              credential: fetchCredential.credential,
+            }
+          : { provider: "native" };
 
   return { search, fetch, warnings };
 }
