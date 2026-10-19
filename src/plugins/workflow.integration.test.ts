@@ -33,6 +33,9 @@
 //   finishPluginTask - Completes a tracked plugin task with a strict result block.
 //   finishPluginTaskWithRawOutput - Completes a tracked plugin task with raw output.
 //   listPluginItems - Lists and parses plugin work items.
+//   LISTED_STATE_POLL_TIMEOUT_MS - Upper bound for deterministic listed-state polling.
+//   LISTED_STATE_POLL_INTERVAL_MS - Delay between listed-state poll attempts.
+//   waitForListedItemState - Polls work_item_list until the first item reaches the expected state.
 //   createToolContext - Builds a workflow tool execution context.
 //   parseToolJson - Parses structured workflow tool output.
 //   wrapTaskResult - Wraps tracked output in an OpenCode task-result envelope.
@@ -51,7 +54,7 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [C-OPENCODE-V2-NATIVE wi-7 - Added event-pump per-event containment coverage: a throwing event is logged as a bounded contained failure and a later session.deleted is still processed by the live subscription.]
+//   LAST_CHANGE: [direct test determinism fix - The fake client now shares one creation instant between the scripted continuation message and the acceptance record, and post-finish listed-state reads go through a bounded waitForListedItemState poll helper, so parallel-load runs stop racing the awaiting_reviews transition behind bounded continuations.]
 // END_CHANGE_SUMMARY
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -1592,12 +1595,18 @@ async function createWorkflowPluginHarness(
       inbox: { list: async () => [] },
       prompt: async (input: { sessionID: string; text: string }) => {
         promptCalls.push({ sessionID: input.sessionID, text: input.text });
+        // One creation instant shared by the scripted continuation message and
+        // the acceptance record, mirroring the real host where both describe
+        // the same accepted prompt. Two independent Date.now() calls can
+        // straddle a millisecond tick under parallel load, which made the
+        // repair's new-message filter (created >= acceptedTime) reject a
+        // genuine continuation and settled the item back to "open".
+        const created = Date.now();
         const entry = pendingPromptResponses.shift();
         if (typeof entry === "object" && entry !== null && "throws" in entry) {
           throw new Error(entry.throws);
         }
         if (typeof entry === "string") {
-          const created = Date.now();
           messageCounter += 1;
           messages.set(input.sessionID, [
             ...(messages.get(input.sessionID) ?? []),
@@ -1612,7 +1621,7 @@ async function createWorkflowPluginHarness(
         return {
           id: `msg_prompt_${input.sessionID}`,
           sessionID: input.sessionID,
-          time: { created: Date.now() },
+          time: { created },
         };
       },
       wait: async () => undefined,
@@ -1897,13 +1906,13 @@ describe("workflow plugin integration", () => {
     await launchPluginTask(plugin, sessionID, "code", "vv-code-reviewer", workItemId);
 
     await finishPluginTask(plugin, sessionID, "spec", "vv-spec-reviewer", workItemId, "FAIL");
-    let listed = await listPluginItems(plugin, sessionID);
+    let listed = await waitForListedItemState(plugin, sessionID, "awaiting_reviews");
     expect(listed.items[0]?.state).toBe("awaiting_reviews");
     expect(listed.items[0]?.currentRound?.results.spec?.status).toBe("FAIL");
     expect(listed.items[0]?.currentRound?.inFlightReviewers).toEqual(["code"]);
 
     await finishPluginTask(plugin, sessionID, "code", "vv-code-reviewer", workItemId, "FAIL");
-    listed = await listPluginItems(plugin, sessionID);
+    listed = await waitForListedItemState(plugin, sessionID, "ready_to_close");
     expect(listed.items[0]?.state).toBe("ready_to_close");
     expect(listed.items[0]?.currentRound?.results.code?.status).toBe("FAIL");
   });
@@ -1924,7 +1933,7 @@ describe("workflow plugin integration", () => {
       workItemId,
       "NEEDS_CONTEXT",
     );
-    let listed = await listPluginItems(plugin, sessionID);
+    let listed = await waitForListedItemState(plugin, sessionID, "awaiting_reviews");
     expect(listed.items[0]?.state).toBe("awaiting_reviews");
 
     const aggregateHardStop = await finishPluginTask(
@@ -1936,7 +1945,7 @@ describe("workflow plugin integration", () => {
       "PASS",
     );
     expect(aggregateHardStop).toContain("RESULT_HARD_STOP: needs_context");
-    listed = await listPluginItems(plugin, sessionID);
+    listed = await waitForListedItemState(plugin, sessionID, "needs_context");
     expect(listed.items[0]?.state).toBe("needs_context");
   });
 
@@ -1957,7 +1966,7 @@ describe("workflow plugin integration", () => {
     );
     expect(blocked).toContain("Blocked because the target API contract is missing.");
 
-    const listed = await listPluginItems(plugin, sessionID);
+    const listed = await waitForListedItemState(plugin, sessionID, "blocked");
     expect(listed.items[0]?.state).toBe("blocked");
     expect(listed.items[0]?.resultExcerpt?.source).toBe("parsed_body");
     expect(listed.items[0]?.resultExcerpt?.text).toBe(
@@ -2030,7 +2039,7 @@ describe("workflow plugin integration", () => {
       "[workflow][resultParsing][BLOCK_PARSE_RESULT] bounded continuation attempted",
     );
 
-    const listed = await listPluginItems(plugin, sessionID);
+    const listed = await waitForListedItemState(plugin, sessionID, "awaiting_reviews");
     expect(listed.items[0]?.state).toBe("awaiting_reviews");
     expect(listed.items[0]?.currentRound).toBeDefined();
     expect(logs).toContain("[workflow][resultParsing][BLOCK_PARSE_RESULT] result parsed");
@@ -2056,7 +2065,7 @@ describe("workflow plugin integration", () => {
 
     expect(promptCalls).toHaveLength(1);
     expect(promptCalls[0]?.sessionID).toBe("ses_element_child");
-    const listed = await listPluginItems(plugin, sessionID);
+    const listed = await waitForListedItemState(plugin, sessionID, "awaiting_reviews");
     expect(listed.items[0]?.state).toBe("awaiting_reviews");
   });
 
@@ -2066,7 +2075,9 @@ describe("workflow plugin integration", () => {
     const resultSession = "session-valid-result";
     const resultItem = await openAndLaunchImplementer(plugin, resultSession);
     await finishPluginTask(plugin, resultSession, "impl", "vv-implementer", resultItem, "DONE");
-    expect((await listPluginItems(plugin, resultSession)).items[0]?.state).toBe("awaiting_reviews");
+    expect(
+      (await waitForListedItemState(plugin, resultSession, "awaiting_reviews")).items[0]?.state,
+    ).toBe("awaiting_reviews");
 
     const hardStopSession = "session-valid-hard-stop";
     const hardStopItem = await openAndLaunchImplementer(plugin, hardStopSession);
@@ -2235,7 +2246,7 @@ describe("workflow plugin integration", () => {
     expect(hardStopDiagnostic).toContain("RESULT_HARD_STOP");
 
     expect(promptCalls).toHaveLength(1);
-    const listed = await listPluginItems(plugin, sessionID);
+    const listed = await waitForListedItemState(plugin, sessionID, "needs_context");
     expect(listed.items[0]?.state).toBe("needs_context");
   });
 
@@ -2294,7 +2305,7 @@ describe("workflow plugin integration", () => {
     );
     expect(reviewerHardStop).toContain("Need schema ownership decision before review can pass.");
 
-    const listed = await listPluginItems(plugin, sessionID);
+    const listed = await waitForListedItemState(plugin, sessionID, "needs_context");
     expect(listed.items[0]?.state).toBe("needs_context");
     expect(listed.items[0]?.currentRound?.results.spec?.resultExcerpt?.text).toBe(
       "Need schema ownership decision before review can pass.",
@@ -2810,6 +2821,32 @@ async function listPluginItems(
     createToolContext(sessionID) as never,
   );
   return parseToolJson<ListedPluginItems>(listedRaw ?? "{}");
+}
+
+const LISTED_STATE_POLL_TIMEOUT_MS = 2_000;
+const LISTED_STATE_POLL_INTERVAL_MS = 5;
+
+/**
+ * Deterministic read of the first listed item's state after a tracked finish.
+ * The foreground apply path settles inside the awaited execute.after hook, but
+ * deferred settlement paths (bounded same-child continuation, event-pump
+ * synthetic delivery) can land the transition a macrotask or two later, so a
+ * single immediate read races the state machine under parallel load. Poll
+ * until the expected state is visible; on timeout return the last listing so
+ * the caller's assert fails with the real observed state.
+ */
+async function waitForListedItemState(
+  plugin: NativeWorkflowHarnessPlugin,
+  sessionID: string,
+  expectedState: ListedPluginItems["items"][number]["state"],
+): Promise<ListedPluginItems> {
+  const deadline = Date.now() + LISTED_STATE_POLL_TIMEOUT_MS;
+  let listed = await listPluginItems(plugin, sessionID);
+  while (listed.items[0]?.state !== expectedState && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, LISTED_STATE_POLL_INTERVAL_MS));
+    listed = await listPluginItems(plugin, sessionID);
+  }
+  return listed;
 }
 
 function createToolContext(sessionID: string, agent = "vv-controller") {
