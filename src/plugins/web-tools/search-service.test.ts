@@ -376,6 +376,55 @@ describe("createWebSearchTool", () => {
     });
   });
 
+  test("dispatches direct DeepSeek search and reports plain credential metadata", async () => {
+    let requestedUrl = "";
+    let requestedHeaders: Record<string, string> | undefined;
+    const definition = createWebSearchToolForConfig(
+      {
+        provider: "deepseek",
+        envVar: "DEEPSEEK_API_KEY",
+        configField: "web.search.apiKey",
+        credential: { value: "deepseek-secret", source: "env" },
+      },
+      createPermission(),
+    );
+
+    const result = await withFetch(
+      async (url, init) => {
+        requestedUrl = String(url);
+        requestedHeaders = init?.headers as Record<string, string>;
+        return new Response(
+          JSON.stringify({
+            results: [
+              {
+                title: "DeepSeek Search API",
+                url: "https://example.test/deepseek",
+                snippet: "Direct search result.",
+                date: "2026-06-01T00:00:00+00:00",
+              },
+            ],
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      },
+      () => definition.execute({ query: "deepseek", count: 5 }, createContext()),
+    );
+
+    expect(requestedUrl).toBe("https://api.deepseek.com/v1/tools/search");
+    expect(requestedHeaders?.Authorization).toBe("Bearer deepseek-secret");
+    expect(result).toEqual({
+      output:
+        "1. [DeepSeek Search API](https://example.test/deepseek)\n   Direct search result.\n   _2026-06-01T00:00:00+00:00_",
+      content:
+        "1. [DeepSeek Search API](https://example.test/deepseek)\n   Direct search result.\n   _2026-06-01T00:00:00+00:00_",
+      metadata: {
+        provider: "deepseek",
+        resultCount: 1,
+        credentialSource: "env",
+      },
+    });
+  });
+
   test("missing credentials name both supported locations without a value", async () => {
     const definition = createWebSearchToolForConfig(
       { provider: "brave", envVar: "BRAVE_API_KEY", configField: "web.search.apiKey" },

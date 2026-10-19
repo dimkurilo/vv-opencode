@@ -1,10 +1,10 @@
 // FILE: src/plugins/web-tools/search-service.ts
-// VERSION: 2.1.0
+// VERSION: 2.2.0
 // START_MODULE_CONTRACT
 //   PURPOSE: Build the provider-neutral native web_search tool: strict contract validation with explicit execute-time defaults, per-family captured policy/config resolution, awaited resource permission before any network effect, provider dispatch, and ranked Markdown rendering.
-//   SCOPE: Native tool Info factory, per-session policy seams (enabled/disabled/unknown), and Markdown rendering. Validates raw host-forwarded arguments through the shared web_search contract before any permission request or provider dispatch, requests a resource-specific native permission through an injected guard, then delegates transport to the Exa, Brave, and direct Z.AI adapters. No V1 ToolDefinition/context.ask, no startup-global toggle, no credential or provider arguments.
-//   DEPENDS: [@opencode/plugin/promise/tool, zod, src/lib/agent-tool-contract.ts, src/plugins/web-tools/config.ts, src/plugins/web-tools/schemas.ts, src/plugins/web-tools/http.ts, src/plugins/web-tools/providers/brave.ts, src/plugins/web-tools/providers/exa.ts, src/plugins/web-tools/providers/zai.ts]
-//   LINKS: [M-WEB-SEARCH-SERVICE, M-WEB-EXA, M-WEB-BRAVE, M-WEB-ZAI, M-WEB-HTTP, M-PLUGIN-WEB-TOOLS, M-AGENT-TOOL-CONTRACT, V-M-WEB-SEARCH-SERVICE, DF-WEB-SEARCH]
+//   SCOPE: Native tool Info factory, per-session policy seams (enabled/disabled/unknown), and Markdown rendering. Validates raw host-forwarded arguments through the shared web_search contract before any permission request or provider dispatch, requests a resource-specific native permission through an injected guard, then delegates transport to the Exa, Brave, direct Z.AI, and direct DeepSeek adapters. No V1 ToolDefinition/context.ask, no startup-global toggle, no credential or provider arguments.
+//   DEPENDS: [@opencode/plugin/promise/tool, zod, src/lib/agent-tool-contract.ts, src/plugins/web-tools/config.ts, src/plugins/web-tools/schemas.ts, src/plugins/web-tools/http.ts, src/plugins/web-tools/providers/brave.ts, src/plugins/web-tools/providers/exa.ts, src/plugins/web-tools/providers/zai.ts, src/plugins/web-tools/providers/deepseek.ts]
+//   LINKS: [M-WEB-SEARCH-SERVICE, M-WEB-EXA, M-WEB-BRAVE, M-WEB-ZAI, M-WEB-DEEPSEEK, M-WEB-HTTP, M-PLUGIN-WEB-TOOLS, M-AGENT-TOOL-CONTRACT, V-M-WEB-SEARCH-SERVICE, DF-WEB-SEARCH]
 //   ROLE: RUNTIME
 //   MAP_MODE: EXPORTS
 // END_MODULE_CONTRACT
@@ -23,7 +23,7 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [C-OPENCODE-V2-NATIVE T-005 attempt 2 - Split per-provider execution from a per-session policy resolver so a startup-global toggle can no longer hijack a disabled captured family or block a later enabled one.]
+//   LAST_CHANGE: [direct change - Added the direct DeepSeek search dispatch branch alongside the existing providers.]
 // END_CHANGE_SUMMARY
 
 import { z } from "zod";
@@ -32,6 +32,7 @@ import { ContractInputError } from "../../lib/agent-tool-contract.js";
 import type { ResolvedWebConfig, ResolvedWebSearchConfig } from "./config.js";
 import { DEFAULT_REQUEST_TIMEOUT_MS } from "./http.js";
 import { searchBrave } from "./providers/brave.js";
+import { searchDeepseek } from "./providers/deepseek.js";
 import { searchExa, WebProviderError, type WebSearchResult } from "./providers/exa.js";
 import { searchZai } from "./providers/zai.js";
 import { WEB_SEARCH_TOOL_ID, validateWebSearchToolInput, webSearchContract } from "./schemas.js";
@@ -158,7 +159,9 @@ export async function executeWebSearch(
           ? await searchBrave(searchInput)
           : resolved.provider === "zai"
             ? await searchZai({ ...searchInput, region: resolved.region })
-            : await searchExa(searchInput);
+            : resolved.provider === "deepseek"
+              ? await searchDeepseek(searchInput)
+              : await searchExa(searchInput);
       const rendered = renderSearchMarkdown(results);
       return {
         output: rendered,

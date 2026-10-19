@@ -320,11 +320,26 @@ describe("closed result metadata and attachment producer schemas", () => {
         credentialSource: "env",
       }).success,
     ).toBe(true);
+    expect(
+      webSearchMetadataSchema.safeParse({
+        provider: "deepseek",
+        resultCount: 2,
+        credentialSource: "env",
+      }).success,
+    ).toBe(true);
 
     // A Z.AI result must carry its region; non-Z.AI results must not.
     expect(
       webSearchMetadataSchema.safeParse({
         provider: "zai",
+        resultCount: 1,
+        credentialSource: "env",
+      }).success,
+    ).toBe(false);
+    expect(
+      webSearchMetadataSchema.safeParse({
+        provider: "deepseek",
+        region: "china",
         resultCount: 1,
         credentialSource: "env",
       }).success,
@@ -400,7 +415,31 @@ describe("closed result metadata and attachment producer schemas", () => {
       }).success,
     ).toBe(true);
     expect(
+      webFetchMetadataSchema.safeParse({
+        provider: "deepseek",
+        format: "markdown",
+        credentialSource: "env",
+        status: 200,
+        title: "Example",
+      }).success,
+    ).toBe(true);
+    expect(
+      webFetchMetadataSchema.safeParse({
+        provider: "deepseek",
+        format: "text",
+        credentialSource: "config",
+        status: 200,
+      }).success,
+    ).toBe(true);
+    expect(
       webFetchMetadataSchema.safeParse({ provider: "native", format: "markdown" }).success,
+    ).toBe(false);
+    expect(
+      webFetchMetadataSchema.safeParse({
+        provider: "deepseek",
+        format: "markdown",
+        credentialSource: "env",
+      }).success,
     ).toBe(false);
     expect(
       webFetchMetadataSchema.safeParse({

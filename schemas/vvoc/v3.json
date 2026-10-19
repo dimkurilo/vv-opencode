@@ -458,7 +458,8 @@
               "enum": [
                 "exa",
                 "brave",
-                "zai"
+                "zai",
+                "deepseek"
               ]
             },
             "region": {
@@ -503,7 +504,8 @@
               "enum": [
                 "native",
                 "spider",
-                "zai"
+                "zai",
+                "deepseek"
               ]
             },
             "region": {

@@ -14,7 +14,7 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [direct fix - Covered ${VAR} placeholder substitution in web apiKey fields and unset-reference warnings.]
+//   LAST_CHANGE: [direct change - Covered deepseek provider resolution with the DEEPSEEK_API_KEY env convention and section apiKey fallback.]
 // END_CHANGE_SUMMARY
 
 import { describe, expect, test } from "bun:test";
@@ -81,6 +81,38 @@ describe("resolveWebRuntimeConfig", () => {
     expect(resolved.search.credential).toEqual({ value: "b", source: "env" });
     expect(resolved.fetch.envVar).toBe("SPIDER_API_KEY");
     expect(resolved.fetch.credential).toEqual({ value: "s", source: "env" });
+  });
+
+  test("deepseek search and fetch select DEEPSEEK_API_KEY without a region", () => {
+    const resolved = resolveWebRuntimeConfig(
+      snapshot(
+        { search: { provider: "deepseek" }, fetch: { provider: "deepseek" } },
+        { kind: "global" },
+      ),
+      { DEEPSEEK_API_KEY: "d" },
+    );
+    expect(resolved.search).toEqual({
+      provider: "deepseek",
+      envVar: "DEEPSEEK_API_KEY",
+      configField: "web.search.apiKey",
+      credential: { value: "d", source: "env" },
+    });
+    expect(resolved.fetch).toEqual({
+      provider: "deepseek",
+      envVar: "DEEPSEEK_API_KEY",
+      configField: "web.fetch.apiKey",
+      credential: { value: "d", source: "env" },
+    });
+    expect(resolved.warnings).toEqual([]);
+  });
+
+  test("deepseek falls back to the section apiKey when DEEPSEEK_API_KEY is absent", () => {
+    const resolved = resolveWebRuntimeConfig(
+      snapshot({ search: { provider: "deepseek", apiKey: "from-config" } }, { kind: "global" }),
+      {},
+    );
+    expect(resolved.search.provider).toBe("deepseek");
+    expect(resolved.search.credential).toEqual({ value: "from-config", source: "config" });
   });
 
   test("zai search and fetch preserve regions and share ZAI_API_KEY precedence", () => {

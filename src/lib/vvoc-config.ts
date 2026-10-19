@@ -52,8 +52,8 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [C-TELEGRAM-BRIDGE-PLUGIN T-001 - Added the optional strict top-level telegram section with ${VAR} token convention, single-owner allowlist, activity window, mutually exclusive connectivity modes, and delivery settings defaults.]
-//   PREVIOUS: [C-SYSTEMONE-DECISION-BACKEND T-002 - Added the optional strict systemone connection section and the guardian decisionBackend and systemone policy fields.]
+//   LAST_CHANGE: [direct change - Added deepseek to the canonical web provider vocabularies and types without a region requirement.]
+//   PREVIOUS: [C-TELEGRAM-BRIDGE-PLUGIN T-001 - Added the optional strict top-level telegram section with ${VAR} token convention, single-owner allowlist, activity window, mutually exclusive connectivity modes, and delivery settings defaults. Prior: C-SYSTEMONE-DECISION-BACKEND T-002 - Added the optional strict systemone connection section and the guardian decisionBackend and systemone policy fields.]
 // END_CHANGE_SUMMARY
 
 import { Ajv2020, type ErrorObject } from "ajv/dist/2020.js";
@@ -175,7 +175,7 @@ export type VvocWebRegion = "international" | "china";
 
 export type VvocWebSearchConfig =
   | {
-      provider?: "exa" | "brave";
+      provider?: "exa" | "brave" | "deepseek";
       region?: never;
       apiKey?: string;
     }
@@ -187,7 +187,7 @@ export type VvocWebSearchConfig =
 
 export type VvocWebFetchConfig =
   | {
-      provider?: "native" | "spider";
+      provider?: "native" | "spider" | "deepseek";
       region?: never;
       apiKey?: string;
     }
@@ -437,8 +437,8 @@ const VVOC_PRESET_SCHEMA = {
   },
 };
 
-const WEB_SEARCH_PROVIDERS = ["exa", "brave", "zai"] as const;
-const WEB_FETCH_PROVIDERS = ["native", "spider", "zai"] as const;
+const WEB_SEARCH_PROVIDERS = ["exa", "brave", "zai", "deepseek"] as const;
+const WEB_FETCH_PROVIDERS = ["native", "spider", "zai", "deepseek"] as const;
 const WEB_REGIONS = ["international", "china"] as const;
 
 const ZAI_REGION_REQUIREMENT = Object.fromEntries([

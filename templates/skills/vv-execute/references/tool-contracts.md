@@ -1477,6 +1477,7 @@ Result families:
 - `web_search:exa`: ranked Markdown result from the Exa provider
 - `web_search:brave`: ranked Markdown result from the Brave provider
 - `web_search:zai`: ranked Markdown result from the regional Z.AI provider
+- `web_search:deepseek`: ranked Markdown result from the DeepSeek provider
 
 Representative failures:
 - `count`: an out-of-range count is rejected before dispatch
@@ -1639,6 +1640,7 @@ Result families:
 - `web_fetch:text-native`: native textual result envelope
 - `web_fetch:text-spider`: Spider textual result envelope with request timing
 - `web_fetch:text-zai`: regional Z.AI textual result envelope with reader metadata
+- `web_fetch:text-deepseek`: DeepSeek textual result envelope with page metadata
 - `web_fetch:media-native`: native media result envelope with a real attachment
 - `web_fetch:media-spider`: Spider media result envelope with request timing
 - `web_fetch:media-zai`: regional Z.AI media result envelope with a real attachment

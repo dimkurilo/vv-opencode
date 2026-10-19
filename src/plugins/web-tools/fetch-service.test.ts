@@ -421,6 +421,47 @@ describe("createWebFetchTool", () => {
     });
   });
 
+  test("surfaces direct DeepSeek fetch content with status and title metadata", async () => {
+    const definition = createWebFetchToolForConfig(
+      {
+        provider: "deepseek",
+        envVar: "DEEPSEEK_API_KEY",
+        configField: "web.fetch.apiKey",
+        credential: { value: "deepseek-secret", source: "config" },
+      },
+      createPermission(),
+    );
+    let requestedUrl = "";
+    const result = await withFetch(
+      async (url, init) => {
+        requestedUrl = String(url);
+        expect(JSON.parse(String(init?.body))).toEqual({ url: "https://example.test/page" });
+        return new Response(
+          JSON.stringify({ title: "Example article", content: "# Example article\n\nBody." }),
+          { headers: { "content-type": "application/json" } },
+        );
+      },
+      () =>
+        definition.execute(
+          { url: "https://example.test/page", format: "markdown", timeout: 30 },
+          createContext(),
+        ),
+    );
+
+    expect(requestedUrl).toBe("https://api.deepseek.com/v1/tools/fetch");
+    expect(result).toEqual({
+      output: "# Example article\n\nBody.",
+      content: "# Example article\n\nBody.",
+      metadata: {
+        provider: "deepseek",
+        format: "markdown",
+        credentialSource: "config",
+        status: 200,
+        title: "Example article",
+      },
+    });
+  });
+
   test("missing Spider credentials name both supported locations without values", async () => {
     const definition = createWebFetchToolForConfig(
       {

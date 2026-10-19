@@ -16,8 +16,8 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [C-TELEGRAM-BRIDGE-PLUGIN T-001 - Covered the optional telegram section: acceptance, required fields, connectivity exclusivity, rejection cases, round-trip, and file schema parity.]
-//   PREVIOUS: [C-SPEC-IDENTITY-LINT - Covered spec-guard schema acceptance, rejection, boolean form, and file schema parity.]
+//   LAST_CHANGE: [direct change - Covered deepseek web provider acceptance in parsing, normalization, and file schema parity.]
+//   PREVIOUS: [C-TELEGRAM-BRIDGE-PLUGIN T-001 - Covered the optional telegram section: acceptance, required fields, connectivity exclusivity, rejection cases, round-trip, and file schema parity.]
 // END_CHANGE_SUMMARY
 
 import { describe, expect, test } from "bun:test";
@@ -202,6 +202,25 @@ describe("optional web section parsing", () => {
     );
     expect(parsed.web?.search).toEqual({ provider: "zai", region: "international" });
     expect(parsed.web?.fetch).toEqual({ provider: "zai", region: "china" });
+  });
+
+  test("deepseek search and fetch parse without a region", () => {
+    const parsed = parseVvocConfigText(
+      docWithWeb({ search: { provider: "deepseek" }, fetch: { provider: "deepseek" } }),
+      "test",
+    );
+    expect(parsed.web?.search).toEqual({ provider: "deepseek" });
+    expect(parsed.web?.fetch).toEqual({ provider: "deepseek" });
+    expect(
+      validateVvocConfigDocument(
+        JSON.parse(
+          docWithWeb({
+            search: { provider: "deepseek" },
+            fetch: { provider: "deepseek" },
+          }),
+        ),
+      ).length,
+    ).toBe(0);
   });
 
   test("zai provider without a region is rejected", () => {
