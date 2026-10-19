@@ -1,9 +1,9 @@
 // FILE: src/commands/preset.test.ts
-// VERSION: 0.5.1
+// VERSION: 0.6.0
 // START_MODULE_CONTRACT
 //   PURPOSE: Tests for M-CLI-PRESET - declarative named preset workflows.
 //   SCOPE: Built-in profile mappings, preset rendering, atomic role/profile application, no-opencode rewrite guarantees, section preservation, invalid-write safety, and CLI output paths.
-//   DEPENDS: [bun:test, node:fs/promises, node:os, node:path, src/commands/preset.ts, src/lib/opencode.ts, src/lib/vvoc-config.ts]
+//   DEPENDS: [bun:test, node:fs/promises, node:os, node:path, src/commands/preset.ts, src/commands/registered-cli.test-helpers.ts, src/lib/opencode.ts, src/lib/rebind-request.ts, src/lib/vvoc-config.ts]
 //   LINKS: [M-CLI-PRESET, M-ORCHESTRATION-PROFILES, V-M-CLI-PRESET]
 //   ROLE: TEST
 //   MAP_MODE: LOCALS
@@ -14,18 +14,18 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [direct fix - Updated the exact role matrix for the four presets whose default worker role moved to xiaomi/mimo-v2.6-flash#thinking.]
+//   LAST_CHANGE: [v0.6.0 - Routed registered-CLI subprocess coverage through the shared bounded, retried spawn helper with a documented per-test budget.]
 // END_CHANGE_SUMMARY
 
 import { describe, expect, test } from "bun:test";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { applyPreset, formatPreset, listConfiguredPresets, resolvePreset } from "./preset.js";
 import { listRebindRequests, requestRebind } from "../lib/rebind-request.js";
 import { readVvocConfig, resolvePaths } from "../lib/opencode.js";
 import { createDefaultVvocConfig, renderVvocConfig } from "../lib/vvoc-config.js";
+import { REGISTERED_CLI_TEST_TIMEOUT_MS, runRegisteredCli } from "./registered-cli.test-helpers.js";
 
 describe("preset helpers", () => {
   test("createDefaultVvocConfig exposes the canonical built-in preset keys", () => {
@@ -579,138 +579,93 @@ describe("applyPreset", () => {
     }
   });
 
-  test("cli applies a bare preset name without treating it as a subcommand", async () => {
-    const configHome = await mkdtemp(join(tmpdir(), "vvoc-preset-cli-config-"));
-    const projectDir = await mkdtemp(join(tmpdir(), "vvoc-preset-cli-project-"));
+  test(
+    "cli applies a bare preset name without treating it as a subcommand",
+    async () => {
+      const configHome = await mkdtemp(join(tmpdir(), "vvoc-preset-cli-config-"));
+      const projectDir = await mkdtemp(join(tmpdir(), "vvoc-preset-cli-project-"));
 
-    try {
-      const paths = await resolvePaths({
-        scope: "project",
-        cwd: projectDir,
-        configDir: configHome,
-      });
+      try {
+        const paths = await resolvePaths({
+          scope: "project",
+          cwd: projectDir,
+          configDir: configHome,
+        });
 
-      await mkdir(dirname(paths.vvocConfigPath), { recursive: true });
-      await writeFile(paths.vvocConfigPath, renderVvocConfig(createDefaultVvocConfig()), "utf8");
+        await mkdir(dirname(paths.vvocConfigPath), { recursive: true });
+        await writeFile(paths.vvocConfigPath, renderVvocConfig(createDefaultVvocConfig()), "utf8");
 
-      const cliPath = fileURLToPath(new URL("../cli.ts", import.meta.url));
-      const command = Bun.spawn({
-        cmd: [
-          process.execPath,
-          "run",
-          cliPath,
-          "preset",
-          "vv-zai",
-          "--scope",
-          "project",
-          "--config-dir",
-          configHome,
-        ],
-        cwd: projectDir,
-        stdout: "pipe",
-        stderr: "pipe",
-      });
+        const result = await runRegisteredCli(
+          ["preset", "vv-zai", "--scope", "project", "--config-dir", configHome],
+          { cwd: projectDir },
+        );
 
-      const [stdout, stderr, exitCode] = await Promise.all([
-        new Response(command.stdout).text(),
-        new Response(command.stderr).text(),
-        command.exited,
-      ]);
+        expect(result.exitCode).toBe(0);
+        expect(result.stderr).toBe("");
+        expect(result.stdout).toContain("Applied preset vv-zai:");
+        expect(result.stdout).toContain("orchestration: kept (balanced)");
+        expect(result.stdout).toContain(`Target: ${paths.vvocConfigPath}`);
+        expect(result.stdout).toContain(
+          "On OpenCode v1, restart OpenCode to apply the changed roles or orchestration profile. On OpenCode v2, the config watcher applies them without a restart; running sessions stay anchored to their starting preset.",
+        );
+        const vvocConfig = await readVvocConfig(paths);
+        expect(vvocConfig?.roles.default).toBe("zai-coding-plan/glm-5.3-flash#max");
+        expect(vvocConfig?.roles.smart).toBe("zai-coding-plan/glm-5.3#max");
+        expect(vvocConfig?.roles.fast).toBe("zai-coding-plan/glm-5.3-flash#max");
+        expect(vvocConfig?.orchestration).toEqual({ profile: "balanced" });
+      } finally {
+        await rm(configHome, { recursive: true, force: true });
+        await rm(projectDir, { recursive: true, force: true });
+      }
+    },
+    REGISTERED_CLI_TEST_TIMEOUT_MS,
+  );
 
-      expect(exitCode).toBe(0);
-      expect(stderr).toBe("");
-      expect(stdout).toContain("Applied preset vv-zai:");
-      expect(stdout).toContain("orchestration: kept (balanced)");
-      expect(stdout).toContain(`Target: ${paths.vvocConfigPath}`);
-      expect(stdout).toContain(
-        "On OpenCode v1, restart OpenCode to apply the changed roles or orchestration profile. On OpenCode v2, the config watcher applies them without a restart; running sessions stay anchored to their starting preset.",
-      );
-      const vvocConfig = await readVvocConfig(paths);
-      expect(vvocConfig?.roles.default).toBe("zai-coding-plan/glm-5.3-flash#max");
-      expect(vvocConfig?.roles.smart).toBe("zai-coding-plan/glm-5.3#max");
-      expect(vvocConfig?.roles.fast).toBe("zai-coding-plan/glm-5.3-flash#max");
-      expect(vvocConfig?.orchestration).toEqual({ profile: "balanced" });
-    } finally {
-      await rm(configHome, { recursive: true, force: true });
-      await rm(projectDir, { recursive: true, force: true });
-    }
-  }, 20_000);
+  test(
+    "cli reports expected argument validation errors",
+    async () => {
+      const configHome = await mkdtemp(join(tmpdir(), "vvoc-preset-cli-errors-"));
+      const projectDir = await mkdtemp(join(tmpdir(), "vvoc-preset-cli-errors-project-"));
 
-  test("cli reports expected argument validation errors", async () => {
-    const configHome = await mkdtemp(join(tmpdir(), "vvoc-preset-cli-errors-"));
-    const projectDir = await mkdtemp(join(tmpdir(), "vvoc-preset-cli-errors-project-"));
+      try {
+        const paths = await resolvePaths({
+          scope: "project",
+          cwd: projectDir,
+          configDir: configHome,
+        });
 
-    try {
-      const paths = await resolvePaths({
-        scope: "project",
-        cwd: projectDir,
-        configDir: configHome,
-      });
+        await mkdir(dirname(paths.vvocConfigPath), { recursive: true });
+        await writeFile(paths.vvocConfigPath, renderVvocConfig(createDefaultVvocConfig()), "utf8");
 
-      await mkdir(dirname(paths.vvocConfigPath), { recursive: true });
-      await writeFile(paths.vvocConfigPath, renderVvocConfig(createDefaultVvocConfig()), "utf8");
+        const [showMissing, listExtra, bareExtra] = await Promise.all([
+          runRegisteredCli(["preset", "show", "--config-dir", configHome], { cwd: projectDir }),
+          runRegisteredCli(["preset", "list", "vv-codex", "--config-dir", configHome], {
+            cwd: projectDir,
+          }),
+          runRegisteredCli(["preset", "vv-codex", "extra", "--config-dir", configHome], {
+            cwd: projectDir,
+          }),
+        ]);
 
-      const cliPath = fileURLToPath(new URL("../cli.ts", import.meta.url));
+        expect(showMissing.exitCode).toBe(1);
+        expect(showMissing.stderr).toContain("preset name required for `vvoc preset show <name>`");
 
-      const showMissing = Bun.spawn({
-        cmd: [process.execPath, "run", cliPath, "preset", "show", "--config-dir", configHome],
-        cwd: projectDir,
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      const listExtra = Bun.spawn({
-        cmd: [
-          process.execPath,
-          "run",
-          cliPath,
-          "preset",
-          "list",
-          "vv-codex",
-          "--config-dir",
-          configHome,
-        ],
-        cwd: projectDir,
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      const bareExtra = Bun.spawn({
-        cmd: [
-          process.execPath,
-          "run",
-          cliPath,
-          "preset",
-          "vv-codex",
-          "extra",
-          "--config-dir",
-          configHome,
-        ],
-        cwd: projectDir,
-        stdout: "pipe",
-        stderr: "pipe",
-      });
+        expect(listExtra.exitCode).toBe(1);
+        expect(listExtra.stderr).toContain(
+          "unexpected extra argument for `vvoc preset list`: vv-codex",
+        );
 
-      const [showStderr, showExit, listStderr, listExit, bareStderr, bareExit] = await Promise.all([
-        new Response(showMissing.stderr).text(),
-        showMissing.exited,
-        new Response(listExtra.stderr).text(),
-        listExtra.exited,
-        new Response(bareExtra.stderr).text(),
-        bareExtra.exited,
-      ]);
-
-      expect(showExit).toBe(1);
-      expect(showStderr).toContain("preset name required for `vvoc preset show <name>`");
-
-      expect(listExit).toBe(1);
-      expect(listStderr).toContain("unexpected extra argument for `vvoc preset list`: vv-codex");
-
-      expect(bareExit).toBe(1);
-      expect(bareStderr).toContain("unexpected extra argument for `vvoc preset <name>`: extra");
-    } finally {
-      await rm(configHome, { recursive: true, force: true });
-      await rm(projectDir, { recursive: true, force: true });
-    }
-  }, 20_000);
+        expect(bareExtra.exitCode).toBe(1);
+        expect(bareExtra.stderr).toContain(
+          "unexpected extra argument for `vvoc preset <name>`: extra",
+        );
+      } finally {
+        await rm(configHome, { recursive: true, force: true });
+        await rm(projectDir, { recursive: true, force: true });
+      }
+    },
+    REGISTERED_CLI_TEST_TIMEOUT_MS,
+  );
 });
 
 describe("preset force rebind request", () => {

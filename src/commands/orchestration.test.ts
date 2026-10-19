@@ -1,9 +1,9 @@
 // FILE: src/commands/orchestration.test.ts
-// VERSION: 1.0.0
+// VERSION: 1.1.0
 // START_MODULE_CONTRACT
 //   PURPOSE: Verify scoped orchestration profile reads, conservative writes, validation safety, source selection, and CLI output.
 //   SCOPE: Default/project/global show behavior, kept/update/bootstrap writes, unrelated config preservation, invalid byte stability, and restart diagnostics.
-//   DEPENDS: [bun:test, node:fs/promises, node:os, node:path, node:url, src/commands/orchestration.ts, src/lib/opencode.ts, src/lib/vvoc-config.ts]
+//   DEPENDS: [bun:test, node:fs/promises, node:os, node:path, src/commands/orchestration.ts, src/commands/registered-cli.test-helpers.ts, src/lib/opencode.ts, src/lib/vvoc-config.ts]
 //   LINKS: [M-CLI-ORCHESTRATION, M-ORCHESTRATION-PROFILES, V-M-CLI-ORCHESTRATION]
 //   ROLE: TEST
 //   MAP_MODE: LOCALS
@@ -14,17 +14,17 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [C-PRESET-ORCHESTRATION-PROFILES - Added complete scoped orchestration command coverage.]
+//   LAST_CHANGE: [v1.1.0 - Routed registered-CLI subprocess coverage through the shared bounded, retried spawn helper with a documented per-test budget.]
 // END_CHANGE_SUMMARY
 
 import { describe, expect, test } from "bun:test";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { resolvePaths } from "../lib/opencode.js";
 import { createDefaultVvocConfig, renderVvocConfig } from "../lib/vvoc-config.js";
 import { setOrchestrationProfile, showOrchestrationProfile } from "./orchestration.js";
+import { REGISTERED_CLI_TEST_TIMEOUT_MS, runRegisteredCli } from "./registered-cli.test-helpers.js";
 
 describe("orchestration show", () => {
   test("defaults to effective balanced profile and default source without writing", async () => {
@@ -173,73 +173,51 @@ describe("orchestration set", () => {
     }
   });
 
-  test("registered CLI set and show print profile, source, target, and restart guidance", async () => {
-    const configHome = await mkdtemp(join(tmpdir(), "vvoc-orchestration-cli-"));
-    const projectDir = await mkdtemp(join(tmpdir(), "vvoc-orchestration-cli-project-"));
-    try {
-      const cliPath = fileURLToPath(new URL("../cli.ts", import.meta.url));
-      const setCommand = Bun.spawn({
-        cmd: [
-          process.execPath,
-          "run",
-          cliPath,
-          "orchestration",
-          "set",
-          "single-session",
-          "--scope",
-          "project",
-          "--config-dir",
-          configHome,
-        ],
-        cwd: projectDir,
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      const [setStdout, setStderr, setExitCode] = await Promise.all([
-        new Response(setCommand.stdout).text(),
-        new Response(setCommand.stderr).text(),
-        setCommand.exited,
-      ]);
-      const paths = await resolvePaths({
-        scope: "project",
-        cwd: projectDir,
-        configDir: configHome,
-      });
+  test(
+    "registered CLI set and show print profile, source, target, and restart guidance",
+    async () => {
+      const configHome = await mkdtemp(join(tmpdir(), "vvoc-orchestration-cli-"));
+      const projectDir = await mkdtemp(join(tmpdir(), "vvoc-orchestration-cli-project-"));
+      try {
+        const setResult = await runRegisteredCli(
+          [
+            "orchestration",
+            "set",
+            "single-session",
+            "--scope",
+            "project",
+            "--config-dir",
+            configHome,
+          ],
+          { cwd: projectDir },
+        );
+        const paths = await resolvePaths({
+          scope: "project",
+          cwd: projectDir,
+          configDir: configHome,
+        });
 
-      expect(setExitCode).toBe(0);
-      expect(setStderr).toBe("");
-      expect(setStdout).toContain("updated: orchestration profile single-session");
-      expect(setStdout).toContain(`Target: ${paths.vvocConfigPath}`);
-      expect(setStdout).toContain("Restart OpenCode to apply the changed orchestration profile.");
+        expect(setResult.exitCode).toBe(0);
+        expect(setResult.stderr).toBe("");
+        expect(setResult.stdout).toContain("updated: orchestration profile single-session");
+        expect(setResult.stdout).toContain(`Target: ${paths.vvocConfigPath}`);
+        expect(setResult.stdout).toContain(
+          "Restart OpenCode to apply the changed orchestration profile.",
+        );
 
-      const showCommand = Bun.spawn({
-        cmd: [
-          process.execPath,
-          "run",
-          cliPath,
-          "orchestration",
-          "show",
-          "--scope",
-          "project",
-          "--config-dir",
-          configHome,
-        ],
-        cwd: projectDir,
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      const [showStdout, showStderr, showExitCode] = await Promise.all([
-        new Response(showCommand.stdout).text(),
-        new Response(showCommand.stderr).text(),
-        showCommand.exited,
-      ]);
-      expect(showExitCode).toBe(0);
-      expect(showStderr).toBe("");
-      expect(showStdout).toContain("Orchestration profile: single-session");
-      expect(showStdout).toContain(`Source: project ${paths.vvocConfigPath}`);
-    } finally {
-      await rm(configHome, { recursive: true, force: true });
-      await rm(projectDir, { recursive: true, force: true });
-    }
-  }, 20_000);
+        const showResult = await runRegisteredCli(
+          ["orchestration", "show", "--scope", "project", "--config-dir", configHome],
+          { cwd: projectDir },
+        );
+        expect(showResult.exitCode).toBe(0);
+        expect(showResult.stderr).toBe("");
+        expect(showResult.stdout).toContain("Orchestration profile: single-session");
+        expect(showResult.stdout).toContain(`Source: project ${paths.vvocConfigPath}`);
+      } finally {
+        await rm(configHome, { recursive: true, force: true });
+        await rm(projectDir, { recursive: true, force: true });
+      }
+    },
+    REGISTERED_CLI_TEST_TIMEOUT_MS,
+  );
 });
