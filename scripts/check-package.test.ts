@@ -1,8 +1,8 @@
 // FILE: scripts/check-package.test.ts
 // VERSION: 1.0.0
 // START_MODULE_CONTRACT
-//   PURPOSE: Prove the manifest-driven package gate accepts the real native surface and fails on independent mutations: a non-native entry, a missing plugin export (including ToolHistoryCompaction), a removed V1 dependency check, a missing declared dependency, an omitted packed forwarder, and a tarball missing a required dist target.
-//   SCOPE: Pure assertions over in-memory manifests and injected import/pack/list dependencies; no repository file is written.
+//   PURPOSE: Prove the manifest-driven package gate accepts the real native surface and fails on independent mutations: a non-native entry, a missing plugin export (including ToolHistoryCompaction), a removed V1 dependency check, a missing declared dependency, an omitted packed forwarder, a tarball missing a required dist target, and a src asset missing from the mirrored dist tree.
+//   SCOPE: Pure assertions over in-memory manifests and injected import/pack/list/asset dependencies; no repository file is written.
 //   DEPENDS: [bun:test, scripts/check-package]
 //   LINKS: [M-AGENT-TOOL-CONTRACT, V-M-AGENT-TOOL-CONTRACT]
 //   ROLE: TEST
@@ -15,19 +15,22 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [C-OPENCODE-V2-NATIVE T-009 - Initial coverage for the manifest-driven export/entry/tarball package gate.]
+//   LAST_CHANGE: [DIRECT-FIX - Added asset-mirror coverage: the gate fails closed naming a src asset that is missing from dist.]
+//   PREVIOUS: [C-OPENCODE-V2-NATIVE T-009 - Initial coverage for the manifest-driven export/entry/tarball package gate.]
 // END_CHANGE_SUMMARY
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  distMirrorPath,
   expectedTarballEntries,
   manifestIssues,
   nativeEntryIssue,
   packageExportRequirements,
   pluginExportName,
   runPackageCheck,
+  verifyAssetMirror,
   verifyPackageExports,
   verifyTarballEntries,
   type PackageManifest,
@@ -159,5 +162,41 @@ describe("manifest and tarball gates", () => {
     );
     expect(status).toBe(1);
     expect(lines.join("\n")).toContain("package/dist/index.js");
+  });
+});
+
+describe("asset mirror gate", () => {
+  test("maps src assets to mirrored dist paths", () => {
+    expect(distMirrorPath("src/plugins/workflow/system-instruction.md")).toBe(
+      "dist/plugins/workflow/system-instruction.md",
+    );
+  });
+
+  test("reports a src asset missing from dist and passes a fully mirrored tree", () => {
+    const sourceAssets = ["src/plugins/workflow/system-instruction.md"];
+    const mirrored = ["dist/plugins/workflow/system-instruction.md"];
+    expect(verifyAssetMirror(sourceAssets, mirrored)).toEqual([]);
+    expect(verifyAssetMirror(sourceAssets, [])).toEqual([
+      "src asset src/plugins/workflow/system-instruction.md is not mirrored to dist at dist/plugins/workflow/system-instruction.md",
+    ]);
+  });
+
+  test("runPackageCheck fails closed naming a src asset that dist does not mirror", async () => {
+    const lines: string[] = [];
+    const status = await runPackageCheck(
+      repoRoot,
+      {
+        importModule: async () => ({ default: { id: "vvoc", setup: () => undefined } }),
+        packTarball: async () => "/tmp/does-not-exist-vvoc.tgz",
+        listTarballEntries: async () => ["package/package.json"],
+        listSourceAssets: async () => ["src/plugins/workflow/system-instruction.md"],
+        listDistAssets: async () => ["dist/index.js"],
+      },
+      (line) => lines.push(line),
+    );
+    expect(status).toBe(1);
+    expect(lines.join("\n")).toContain(
+      "src asset src/plugins/workflow/system-instruction.md is not mirrored to dist at dist/plugins/workflow/system-instruction.md",
+    );
   });
 });
