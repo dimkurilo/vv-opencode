@@ -3,7 +3,7 @@
 // START_MODULE_CONTRACT
 //   PURPOSE: Verify the native ModelRolesPlugin and the production acquireNativeSnapshotRuntime wrapper against native-shaped transforms, hooks, lineage, provenance, config updates and auxiliary fork work.
 //   SCOPE: Native Plugin.define export shape, disabled role override, shared-Context acquisition, bind-on-first-work and qualified-variant materialization, all-kind unbound refusal, agent-aware role selection, initial explicit/implicit provenance, post-bind explicit choices, config.updated reconfiguration, per-event event-pump error containment and recovery (invalid and transient config reads followed by valid lifecycle events), created auxiliary title children, and an optional isolated real OpenCode 2.0.18 host smoke loading the actual built plugin against a loopback provider (skipped unless VVOC_E2E_V2_HOST is set).
-//   DEPENDS: [bun:test, node:fs/promises, node:os, node:path, @opencode/schema/agent, @opencode/schema/model, @opencode/schema/provider, src/lib/vvoc-config.ts, src/plugins/model-roles/index.ts, src/runtime/context.ts, src/runtime/types.ts]
+//   DEPENDS: [bun:test, node:fs/promises, node:net, node:os, node:path, @opencode/schema/agent, @opencode/schema/model, @opencode/schema/provider, src/lib/vvoc-config.ts, src/plugins/model-roles/index.ts, src/runtime/context.ts, src/runtime/types.ts]
 //   LINKS: [M-PLUGIN-MODEL-ROLES, M-NATIVE-RUNTIME, V-M-PLUGIN-MODEL-ROLES]
 //   ROLE: TEST
 //   MAP_MODE: LOCALS
@@ -27,15 +27,17 @@
 //   waitFor - Poll a predicate until it holds or the bounded deadline elapses.
 //   REAL_HOST - Optional pinned real-host binary path.
 //   smokeDescribe - Describe-or-skip wrapper for the real-host smoke.
+//   getFreePort - Reserve and release a loopback TCP port for the host smoke.
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [Direct fix follow-up - Added the pump-missed user-choice regression: an external session-model change the event pump never saw must close the first-work window, so its bare-base dispatch refuses as drift.]
-//   PREVIOUS: [Direct fix - Added the location-only first-turn regression: a session with no agent and no model whose first primary dispatch carries the pre-binding bare role base must be admitted once after the family bound, and later bare-base dispatches still refuse.]
+//   LAST_CHANGE: [Direct fix - Reserved the host-smoke provider and host ports ephemerally via getFreePort instead of fixed loopback ports, so an occupied port can no longer fail the smoke as an ordinary test failure.]
+//   PREVIOUS: [Direct fix follow-up - Added the pump-missed user-choice regression: an external session-model change the event pump never saw must close the first-work window, so its bare-base dispatch refuses as drift.]
 // END_CHANGE_SUMMARY
 
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Agent } from "@opencode/schema/agent";
@@ -1589,6 +1591,18 @@ describe("native lifecycle provenance, resolver coherence and concurrency", () =
 const REAL_HOST = process.env.VVOC_E2E_V2_HOST;
 const smokeDescribe = REAL_HOST ? describe : describe.skip;
 
+/** Reserve and release a loopback TCP port. */
+const getFreePort = (): Promise<number> =>
+  new Promise((resolvePromise, rejectPromise) => {
+    const server = createServer();
+    server.once("error", rejectPromise);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address !== null ? address.port : 0;
+      server.close(() => resolvePromise(port));
+    });
+  });
+
 smokeDescribe("real OpenCode 2.0.18 host smoke (actual built plugin)", () => {
   const ROOT = join(
     process.env.VVOC_E2E_SCRATCH ?? "/tmp/opencode",
@@ -1603,13 +1617,13 @@ smokeDescribe("real OpenCode 2.0.18 host smoke (actual built plugin)", () => {
     "model-roles",
     "index.js",
   );
-  const PORT = 39247;
-  const HOST_PORT = 42947;
   const providerTrace = join(ROOT, "trace", "provider.jsonl");
   const observerTrace = join(ROOT, "trace", "observer.jsonl");
   const pids: number[] = [];
 
   test("loads the built plugin, binds a variant, and sends it in the provider payload", async () => {
+    const PORT = await getFreePort();
+    const HOST_PORT = await getFreePort();
     await rm(ROOT, { recursive: true, force: true });
     await mkdir(join(ROOT, "project", ".vvoc"), { recursive: true });
     await mkdir(join(ROOT, "trace"), { recursive: true });
