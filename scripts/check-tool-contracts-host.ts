@@ -142,7 +142,7 @@
 //   runNativeMatrix - Run the bounded native contract matrix and return observed host evidence.
 //   NATIVE_MATRIX_STEPS - Deterministic native matrix calls including the generic work_item_open accept path.
 //   NATIVE_MATRIX_LIMITS - Declared native-matrix coverage limits recorded in compatibility evidence.
-//   resolveEvidenceTarget - Require the approved active bundle directory to already exist.
+//   resolveEvidenceTarget - Require the approved active bundle directory to already exist, reporting the exact creation command when missing.
 //   invalidateEvidence - Remove prior owned passing evidence so a stale pass cannot mislead.
 //   writeEvidenceIfAllowed - Write evidence only on a valid target, no failures, and within cap.
 //   describeDefinition - Bounded per-tool projection/description digest summary.
@@ -152,7 +152,8 @@
 // END_MODULE_MAP
 //
 // START_CHANGE_SUMMARY
-//   LAST_CHANGE: [C-OPENCODE-V2-NATIVE T-009-SECRETS - Restored generic work_item_open accept coverage in the native matrix (the frozen-input defect was fixed in secrets-redaction deep.ts, not the workflow path) and removed the stale work_item_open nativeLimit workaround; limits are now the exported NATIVE_MATRIX_LIMITS constant.]
+//   LAST_CHANGE: [Direct fix - A missing active change bundle directory now fails closed with the exact repo-root-relative mkdir command in the resolveEvidenceTarget reason; the runner still never creates the directory itself, because a bundle directory without a spec.xml turns `grace lint` red (xml.missing-file).]
+//   PREVIOUS: [C-OPENCODE-V2-NATIVE T-009-SECRETS - Restored generic work_item_open accept coverage in the native matrix (the frozen-input defect was fixed in secrets-redaction deep.ts, not the workflow path) and removed the stale work_item_open nativeLimit workaround; limits are now the exported NATIVE_MATRIX_LIMITS constant.]
 //   PREVIOUS: [C-OPENCODE-V2-NATIVE T-009-HOST - Ported the live harness to native 2.0.18: pinned-binary SHA/version gating, native probe and composing-aggregate plugins (native tool domain + hooks), native cohorts/config/pins/provenance, current-bundle evidence, and a bounded native matrix that verifies the nine owned registrations, native projections, accept/reject diagnostics and side-effect isolation.]
 // END_CHANGE_SUMMARY
 
@@ -4079,16 +4080,23 @@ export function checkPinnedManifests(
   return { ok: true, manifests };
 }
 
-/** Resolve the evidence target, requiring the approved active change bundle to already exist. */
+/**
+ * Resolve the evidence target, requiring the approved active change bundle to
+ * already exist. A missing bundle directory fails closed with the exact
+ * repo-root-relative creation command in the reason; the runner never creates
+ * the directory itself, because a directory inside `.grace/changes/active/`
+ * without a spec.xml breaks `grace lint` (xml.missing-file).
+ */
 export function resolveEvidenceTarget(
   repoRoot: string,
 ): { ok: true; path: string } | { ok: false; reason: string } {
   const path = join(repoRoot, HOST_EVIDENCE_RELATIVE_PATH);
   const parent = dirname(path);
   if (!existsSync(parent)) {
+    const bundleDir = dirname(HOST_EVIDENCE_RELATIVE_PATH);
     return {
       ok: false,
-      reason: `active change bundle directory is missing: ${HOST_EVIDENCE_RELATIVE_PATH} (not recreating it)`,
+      reason: `active change bundle directory is missing: ${bundleDir} (the runner never creates it). From the repository root run: mkdir -p ${bundleDir}`,
     };
   }
   return { ok: true, path };
